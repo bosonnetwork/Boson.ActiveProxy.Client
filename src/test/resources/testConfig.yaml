@@ -1,0 +1,15 @@
+service:
+  peerId: D4iSB7Bb9z5GnSRfYgEKvDsJqErEZhYkrdKY8HxtqKWB
+  host: 192.168.8.80
+  port: 8090
+
+client:
+  # user id: C5ioCZVtMMjRB9d1Ge78kzEAHs5nZroFxXkuySKEMVPu
+  userPrivateKey: 5pGpPPeTLGHhy1vMPaHcHyqNKMcbzsutX3MKyvg724yTbmFjwZnwGg4DQKqkHU2y72RsigZrFuHixmrYeaR2aFou
+  # device id: J1U9j2XxJRctuYEs4e3zWLrosBCQiW1LHht66gbj4Z4G
+  devicePrivateKey: 2RjgmJ2oSzJUhbPTUN3qdUtBNJg8xaTKk9GtvMUR8QzKxUr23TKhe4JXHxsRqLpQW1NnTVx8v7ZcXgNgLXyNRd48
+
+upstream:
+  host: 127.0.0.1
+  port: 8888
+  scheme: http://
