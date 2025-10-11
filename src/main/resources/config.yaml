@@ -1,0 +1,32 @@
+# This is the sample configuration file for the Active Proxy client.
+
+# Configuration for the Active Proxy service peer.
+# The peerId is mandatory.
+# The host and port are optional. If omitted, the client will perform a DHT lookup to resolve
+# the peer’s network address. If provided, these values will be used directly as the peer’s address.
+service:
+  peerId: GbRwG3WgKgApSDBr9FGo5Y3RssSWxfWhanXMBdPCo5F2
+  host: 192.168.8.80
+  port: 8090
+
+# Client credentials.
+# Both the user and device private keys are required.
+client:
+  userPrivateKey: 5nzta5SD3T2Dky66ZmkDN7rhyFZjHLUvXENosNTA495boCuP8DA8msqu85L7ZhydxiLw1MxGYUhsDydM6gbTpGP5
+  devicePrivateKey: 65z3qLiMmn6zZJNWHxY9GsXst9u7QKDfnk8co4JqNAKjL1xTZvj2cxs3a9svGNrkGheCcM1fpZV1dSGheYZ7EFFx
+
+# Upstream server configuration.
+# The host and port are mandatory, The scheme is optional, defaults to "tcp://".
+upstream:
+  host: 127.0.0.1
+  port: 8888
+  scheme: http://
+
+# Enables name-based access to the proxied endpoint.
+# This feature depends on the service peer’s capabilities and the client’s subscription level.
+# Optional. Defaults to false.
+nameAccess: false
+
+# Controls whether the client should announce its proxied endpoint to the DHT network for peer discovery.
+# Optional. Defaults to false.
+announcePeer: false
