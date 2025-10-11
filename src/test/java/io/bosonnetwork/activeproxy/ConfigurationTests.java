@@ -120,7 +120,7 @@ public class ConfigurationTests {
 		Map<String, Object> loadedMap = Json.yamlMapper().readValue(testFile.toFile(), Json.mapType());
 		assertEquals(configMap, loadedMap);
 
-		Configuration loaded = new Configuration(loadedMap);
+		Configuration loaded = Configuration.fromMap(loadedMap);
 		assertEquals(config.getServicePeerId(), loaded.getServicePeerId());
 		assertEquals(config.getServiceHost(), loaded.getServiceHost());
 		assertEquals(config.getServicePort(), loaded.getServicePort());
