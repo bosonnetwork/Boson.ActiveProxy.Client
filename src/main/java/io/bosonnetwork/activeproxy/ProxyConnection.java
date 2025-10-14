@@ -60,19 +60,19 @@ public class ProxyConnection {
 		Initializing {
 			@Override
 			public boolean accept(PacketType type) {
-				return type == PacketType.CHALLENGE || type == PacketType.PING_ACK;
+				return type == PacketType.CHALLENGE;
 			}
 		},
 		Authenticating {
 			@Override
 			public boolean accept(PacketType type) {
-				return type == PacketType.AUTH_ACK || type == PacketType.PING_ACK;
+				return type == PacketType.AUTH_ACK;
 			}
 		},
 		Attaching {
 			@Override
 			public boolean accept(PacketType type) {
-				return type == PacketType.ATTACH_ACK || type == PacketType.PING_ACK;
+				return type == PacketType.ATTACH_ACK;
 			}
 		},
 		Idling {
@@ -121,8 +121,14 @@ public class ProxyConnection {
 
 		this.lastReceiveTimestamp = System.currentTimeMillis();
 		this.proxySocket = proxySocket;
-		proxySocket.closeHandler(v -> close());
-		proxySocket.exceptionHandler(v -> close());
+		proxySocket.closeHandler(v -> {
+			log.debug("Connection {} closed by proxy socket", id);
+			close();
+		});
+		proxySocket.exceptionHandler(e -> {
+			log.error("Connection {} got exception from proxy socket", id, e);
+			close();
+		});
 		proxySocket.handler(this::proxyHandler);
 	}
 
@@ -131,60 +137,54 @@ public class ProxyConnection {
 		return id;
 	}
 
+	private Future<Void> sendPacket(PacketType type, Buffer buffer) {
+		return proxySocket.write(buffer).andThen(ar -> {
+			if (ar.succeeded()) {
+				log.trace("Connection {} sent {} packet to proxy socket", id, type);
+			} else {
+				if (log.isDebugEnabled())
+					log.error("Connection {} failed to send {} packet to proxy socket", id, type, ar.cause());
+				else
+					log.error("Connection {} failed to send {} packet to proxy socket: {}", id, type, ar.cause().getMessage());
+
+				close();
+			}
+		});
+	}
+
 	protected Future<Void> sendAuth(Id userId, Id deviceId, CryptoBox.PublicKey clientSessionPk, boolean nameAccess,
 						 byte[] userSig, byte[] deviceSig, CryptoContext peerContext) {
 		state = State.Authenticating;
 		Packet.Auth auth = new Packet.Auth(Packet.VERSION, userId, deviceId, clientSessionPk, nameAccess, userSig, deviceSig);
-		return proxySocket.write(auth.encode(peerContext)).andThen(ar -> {
-			if (ar.failed())
-				close();
-		});
+		return sendPacket(PacketType.AUTH, auth.encode(peerContext));
 	}
 
 	protected Future<Void> sendAttach(Id deviceId, CryptoBox.PublicKey clientSessionPk, byte[] deviceSig, CryptoContext peerContext) {
 		state = State.Attaching;
 		Packet.Attach attach = new Packet.Attach(deviceId, clientSessionPk, deviceSig);
-		return proxySocket.write(attach.encode(peerContext)).andThen(ar -> {
-			if (ar.failed())
-				close();
-		});
+		return sendPacket(PacketType.ATTACH, attach.encode(peerContext));
 	}
 
-	private Future<Void> sendPingRequest() {
-		return proxySocket.write(Packet.Ping.encode()).andThen(ar -> {
-			if (ar.failed())
-				close();
-		});
+	private Future<Void> sendPing() {
+		return sendPacket(PacketType.PING, Packet.Ping.encode());
 	}
 
 	private Future<Void> sendConnectAck(boolean succeeded) {
 		Packet.ConnectAck ack = Packet.ConnectAck.of(succeeded);
-		return proxySocket.write(ack.encode()).andThen(ar -> {
-			if (ar.failed())
-				close();
-		});
+		return sendPacket(PacketType.CONNECT_ACK, ack.encode());
 	}
 
 	private Future<Void> sendDisconnect() {
-		return proxySocket.write(Packet.Disconnect.encode()).andThen(ar -> {
-			if (ar.failed())
-				close();
-		});
+		return sendPacket(PacketType.DISCONNECT, Packet.Disconnect.encode());
 	}
 
 	private Future<Void> sendDisconnectAck() {
-		return proxySocket.write(Packet.DisconnectAck.encode()).andThen(ar -> {
-			if (ar.failed())
-				close();
-		});
+		return sendPacket(PacketType.DISCONNECT_ACK, Packet.DisconnectAck.encode());
 	}
 
 	private Future<Void> sendData(byte[] data) {
 		Packet.Data packet = new Packet.Data(data);
-		Future<Void> future = proxySocket.write(packet.encode(sessionContext)).andThen(ar -> {
-			if (ar.failed())
-				close();
-		});
+		Future<Void> future = sendPacket(PacketType.DATA, packet.encode(sessionContext));
 
 		// Flow control for the upstream to the proxy
 		if (proxySocket.writeQueueFull()) {
@@ -313,7 +313,7 @@ public class ProxyConnection {
 	}
 
 	private void handleAuthAck(Packet.AuthAck packet) {
-		handler.authenticated(this, packet.serverSessionPk(), packet.maxConnections(),
+		this.sessionContext = handler.authenticated(this, packet.serverSessionPk(), packet.maxConnections(),
 				packet.nameAccess(), packet.endpoint(), packet.namedEndpoint());
 		state = State.Idling;
 		handler.open(this);
@@ -335,12 +335,14 @@ public class ProxyConnection {
 
 		state = State.Connecting;
 		vertxContext.runOnContext(v -> handler.busy(this));
+		log.debug("Connection {} connecting to the upstream...", id);
 		handler.connectUpstream().andThen(ar -> {
 			disconnectConfirms = 0;
 
 			if (ar.succeeded()) {
-				log.debug("Connection {} connected to the upstream: {}", id, upstreamSocket.remoteAddress());
-				connectUpstream(ar.result());
+				NetSocket socket = ar.result();
+				log.debug("Connection {} connected to the upstream: {}", id, socket.remoteAddress());
+				connectUpstream(socket);
 			} else {
 				state = State.Idling;
 				vertxContext.runOnContext(v -> handler.idle(this));
@@ -430,7 +432,7 @@ public class ProxyConnection {
 		} else {
 			// disconnected from the client side before connected to the upstream.
 			// close and drop the upstream socket, keep the status no change
-			log.warn("Connection {} dropped the upstream socket in {} state", id, state);
+			log.debug("Connection {} dropped the upstream socket in {} state", id, state);
 			upstreamSocket.close();
 		}
 	}
@@ -456,7 +458,7 @@ public class ProxyConnection {
 
 		int randomShift = Random.random().nextInt(10000); // max 10 seconds
 		if ((now - lastReceiveTimestamp) >= (KEEP_ALIVE_INTERVAL - randomShift))
-			sendPingRequest();
+			sendPing();
 	}
 
 	public Future<Void> close(boolean silent) {
@@ -467,17 +469,17 @@ public class ProxyConnection {
 
 		// just close the sockets without handle close futures
 		if (upstreamSocket != null) {
+			upstreamSocket.handler(null);
 			upstreamSocket.closeHandler(null);
 			upstreamSocket.exceptionHandler(null);
-			upstreamSocket.handler(null);
 			upstreamSocket.close();
 			upstreamSocket = null;
 		}
 
 		if (proxySocket != null) {
+			proxySocket.handler(null);
 			proxySocket.closeHandler(null);
 			proxySocket.exceptionHandler(null);
-			proxySocket.handler(null);
 			proxySocket.close();
 			proxySocket = null;
 		}
