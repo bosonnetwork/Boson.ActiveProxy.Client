@@ -57,12 +57,13 @@ public class ProxySession extends VerticleBase {
 	private static final int RE_ANNOUNCE_INTERVAL = 60 * 60 * 1000;	// 60 minutes
 	private static final int MAX_IDLE_TIME = 5 * 60 * 1000;			// 5 minutes
 
+	private final Id servicePeerId;
+
 	private Node node;
 	private Configuration config;
 
 	private Identity userIdentity;
 	private Identity deviceIdentity;
-	private Id servicePeerId;
 	private SocketAddress serviceAddress;
 	private SocketAddress upstreamAddress;
 
@@ -331,6 +332,9 @@ public class ProxySession extends VerticleBase {
 		if (connections.size() >= maxConnections)
 			return false;
 
+		if (connections.isEmpty())
+			return true;
+
 		return inFlights == connections.size();
 	}
 
@@ -426,6 +430,9 @@ public class ProxySession extends VerticleBase {
 				}
 			});
 		}
+
+		if (needsNewConnection())
+			connect();
 	}
 
 	private void connectionIdleHandler(@SuppressWarnings("unused") ProxyConnection connection) {
@@ -446,7 +453,6 @@ public class ProxySession extends VerticleBase {
 
 		serviceAddress = null;
 		upstreamAddress = null;
-		servicePeerId = null;
 		userIdentity = null;
 		deviceIdentity = null;
 		node = null;
@@ -469,6 +475,7 @@ public class ProxySession extends VerticleBase {
 			clientSessionKeyPair = null;
 		}
 
+		log.debug("Proxy session {} closed", servicePeerId);
 		return Future.succeededFuture();
 	}
 

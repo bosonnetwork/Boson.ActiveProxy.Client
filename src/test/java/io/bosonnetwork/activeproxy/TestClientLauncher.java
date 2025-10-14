@@ -7,7 +7,6 @@ import io.vertx.core.Vertx;
 import io.vertx.core.VertxOptions;
 
 import io.bosonnetwork.utils.Json;
-import io.bosonnetwork.utils.vertx.VertxFuture;
 
 public class TestClientLauncher {
 	private static Vertx vertx;
@@ -26,10 +25,16 @@ public class TestClientLauncher {
 	public static void main(String[] args) {
 		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
 			if (client != null) {
-				System.out.println("Shutting down client...");
-				client.stop()
-						.thenCompose(v -> VertxFuture.of(vertx.close()))
-						.join();
+				System.out.println("Shutting down the active proxy client...");
+				client.stop().thenRun(() -> {
+					System.out.println("Active proxy client stopped.");
+				}).join();
+
+				// Cannot chain vertx.close() to the above future because closing Vert.x will terminate its event loop,
+				// preventing any pending future handlers from executing.
+				System.out.print("Shutting down Vert.x gracefully...");
+				vertx.close().toCompletionStage().toCompletableFuture().join();
+				System.out.println("Done!");
 			}
 		}));
 
