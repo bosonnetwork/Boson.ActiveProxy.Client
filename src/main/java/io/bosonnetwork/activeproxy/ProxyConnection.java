@@ -53,6 +53,8 @@ public class ProxyConnection {
 
 	private long lastReceiveTimestamp;
 	private int disconnectConfirms;
+	private long readBytes;
+	private long writeBytes;
 
 	private static final Logger log = LoggerFactory.getLogger(ProxyConnection.class);
 
@@ -121,7 +123,7 @@ public class ProxyConnection {
 
 		this.lastReceiveTimestamp = System.currentTimeMillis();
 		this.proxySocket = proxySocket;
-		proxySocket.closeHandler(v -> {
+		proxySocket.endHandler(v -> {
 			log.debug("Connection {} closed by proxy socket", id);
 			close();
 		});
@@ -170,8 +172,7 @@ public class ProxyConnection {
 	}
 
 	private Future<Void> sendConnectAck(boolean succeeded) {
-		Packet.ConnectAck ack = Packet.ConnectAck.of(succeeded);
-		return sendPacket(PacketType.CONNECT_ACK, ack.encode());
+		return sendPacket(PacketType.CONNECT_ACK, Packet.ConnectAck.of(succeeded).encode());
 	}
 
 	private Future<Void> sendDisconnect() {
@@ -183,16 +184,18 @@ public class ProxyConnection {
 	}
 
 	private Future<Void> sendData(byte[] data) {
-		Packet.Data packet = new Packet.Data(data);
-		Future<Void> future = sendPacket(PacketType.DATA, packet.encode(sessionContext));
+		Packet.Data dat = new Packet.Data(data);
+		Future<Void> future = sendPacket(PacketType.DATA, dat.encode(sessionContext));
 
 		// Flow control for the upstream to the proxy
 		if (proxySocket.writeQueueFull()) {
 			log.trace("Proxy socket write queue full, pause upstream reading");
 			upstreamSocket.pause();
 			proxySocket.drainHandler(v -> {
-				if (upstreamSocket != null)
+				if (upstreamSocket != null) {
+					log.trace("Proxy socket write queue drain, resume upstream reading");
 					upstreamSocket.resume();
+				}
 			});
 		}
 
@@ -338,6 +341,8 @@ public class ProxyConnection {
 		log.debug("Connection {} connecting to the upstream...", id);
 		handler.connectUpstream().andThen(ar -> {
 			disconnectConfirms = 0;
+			readBytes = 0;
+			writeBytes = 0;
 
 			if (ar.succeeded()) {
 				NetSocket socket = ar.result();
@@ -358,7 +363,15 @@ public class ProxyConnection {
 			return;
 		}
 
-		upstreamSocket.write(Buffer.buffer(packet.data()));
+		upstreamSocket.write(Buffer.buffer(packet.data())).andThen(ar -> {
+			if (ar.succeeded()) {
+				writeBytes += packet.data().length;
+			} else {
+				log.error("Connection {} failed to write data to upstream: {}", id, ar.cause().getMessage());
+				upstreamSocket.close();
+			}
+		});
+
 		// Flow control for the proxy to the upstream
 		if (upstreamSocket.writeQueueFull()) {
 			log.trace("Upstream write queue full, pause proxy reading");
@@ -390,16 +403,18 @@ public class ProxyConnection {
 		disconnectUpstream();
 	}
 
-	private void upstreamSocketCloseHandler(Void unused) {
-		log.debug("Connection {} disconnected upstream.", id);
-		state = State.Disconnecting;
+	private void upstreamSocketEndHandler(Void unused) {
+		log.debug("Connection {} upstream ended.", id);
+		sendDisconnect().onComplete(ar -> {
+			state = State.Disconnecting;
 
-		proxySocket.drainHandler(null);
-		proxySocket.resume();
+			proxySocket.drainHandler(null);
+			proxySocket.resume();
 
-		upstreamSocket = null;
-		sendDisconnect();
-		disconnectUpstream();
+			upstreamSocket.close(); // safe; idempotent
+			upstreamSocket = null;
+			disconnectUpstream();
+		});
 	}
 
 	private void upstreamSocketExceptionHandler(Throwable t) {
@@ -417,6 +432,7 @@ public class ProxyConnection {
 			return;
 		}
 
+		readBytes += data.length();
 		sendData(data.getBytes());
 	}
 
@@ -426,7 +442,7 @@ public class ProxyConnection {
 
 			this.upstreamSocket = upstreamSocket;
 
-			upstreamSocket.closeHandler(this::upstreamSocketCloseHandler);
+			upstreamSocket.endHandler(this::upstreamSocketEndHandler);
 			upstreamSocket.exceptionHandler(this::upstreamSocketExceptionHandler);
 			upstreamSocket.handler(this::upstreamDataHandler);
 		} else {
@@ -442,6 +458,8 @@ public class ProxyConnection {
 			upstreamSocket.close();
 
 		if (++disconnectConfirms == 3) {
+			log.trace(">>>>>>>> Connection {} disconnect confirmed, total read/write: {}/{}, now change state to idle.",
+					id, readBytes, writeBytes);
 			state = State.Idling;
 			disconnectConfirms = 0;
 			vertxContext.runOnContext(v -> handler.idle(this));
@@ -470,7 +488,7 @@ public class ProxyConnection {
 		// just close the sockets without handle close futures
 		if (upstreamSocket != null) {
 			upstreamSocket.handler(null);
-			upstreamSocket.closeHandler(null);
+			upstreamSocket.endHandler(null);
 			upstreamSocket.exceptionHandler(null);
 			upstreamSocket.close();
 			upstreamSocket = null;
@@ -478,7 +496,7 @@ public class ProxyConnection {
 
 		if (proxySocket != null) {
 			proxySocket.handler(null);
-			proxySocket.closeHandler(null);
+			proxySocket.endHandler(null);
 			proxySocket.exceptionHandler(null);
 			proxySocket.close();
 			proxySocket = null;
