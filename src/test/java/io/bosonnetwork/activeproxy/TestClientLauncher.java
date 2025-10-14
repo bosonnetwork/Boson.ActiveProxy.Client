@@ -34,8 +34,8 @@ public class TestClientLauncher {
 		}));
 
 		vertx = Vertx.vertx(new VertxOptions()
-				.setWorkerPoolSize(1)
-				.setEventLoopPoolSize(1)
+				.setWorkerPoolSize(4)
+				.setEventLoopPoolSize(4)
 				.setPreferNativeTransport(true));
 
 		try {

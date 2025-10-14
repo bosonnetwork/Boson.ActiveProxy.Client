@@ -27,13 +27,14 @@ import java.net.InetAddress;
 import io.vertx.core.Future;
 import io.vertx.core.net.NetSocket;
 
+import io.bosonnetwork.CryptoContext;
 import io.bosonnetwork.crypto.CryptoBox;
 
 public interface ProxyConnectionHandler {
 	void challenge(ProxyConnection connection, byte[] challenge);
 
-	void authenticated(ProxyConnection connection, CryptoBox.PublicKey serverSessionPk,
-					   int maxConnections, boolean nameAccess, String endpoint, String namedEndpoint);
+	CryptoContext authenticated(ProxyConnection connection, CryptoBox.PublicKey serverSessionPk,
+								int maxConnections, boolean nameAccess, String endpoint, String namedEndpoint);
 
 	void open(ProxyConnection connection);
 

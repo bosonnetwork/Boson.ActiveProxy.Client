@@ -131,8 +131,8 @@ public class ProxySession extends VerticleBase {
 			}
 
 			@Override
-			public void authenticated(ProxyConnection connection, CryptoBox.PublicKey serverSessionPk, int maxConnections, boolean nameAccess, String endpoint, String namedEndpoint) {
-				authenticatedHandler(connection, serverSessionPk, maxConnections, nameAccess, endpoint, namedEndpoint);
+			public CryptoContext authenticated(ProxyConnection connection, CryptoBox.PublicKey serverSessionPk, int maxConnections, boolean nameAccess, String endpoint, String namedEndpoint) {
+				return authenticatedHandler(connection, serverSessionPk, maxConnections, nameAccess, endpoint, namedEndpoint);
 			}
 
 			@Override
@@ -240,9 +240,9 @@ public class ProxySession extends VerticleBase {
 
 		vertx.cancelTimer(periodicCheckTimer);
 
-		List<ProxyConnection> cs = List.copyOf(connections.keySet());
+		connections.keySet().forEach(c -> c.close(true));
 		connections.clear();
-		cs.forEach(ProxyConnection::close);
+		inFlights = 0;
 
 		if (connected) {
 			connected = false;
@@ -376,7 +376,7 @@ public class ProxySession extends VerticleBase {
 		}
 	}
 
-	private void authenticatedHandler(@SuppressWarnings("unused") ProxyConnection connection,
+	private CryptoContext authenticatedHandler(@SuppressWarnings("unused") ProxyConnection connection,
 									  CryptoBox.PublicKey serverSessionPk, int maxConnections,
 									  boolean nameAccess, String endpoint, String namedEndpoint) {
 		this.connected = true;
@@ -401,6 +401,8 @@ public class ProxySession extends VerticleBase {
 			if (connectionStatusListener != null)
 				connectionStatusListener.connected();
 		});
+
+		return sessionContext;
 	}
 
 	private void connectionOpenHandler(@SuppressWarnings("unused") ProxyConnection connection) {
