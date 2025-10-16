@@ -33,7 +33,6 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import io.vertx.core.Future;
-import io.vertx.core.VerticleBase;
 import io.vertx.core.net.NetClient;
 import io.vertx.core.net.NetClientOptions;
 import io.vertx.core.net.NetSocket;
@@ -49,8 +48,9 @@ import io.bosonnetwork.PeerInfo;
 import io.bosonnetwork.crypto.CryptoBox;
 import io.bosonnetwork.crypto.CryptoException;
 import io.bosonnetwork.crypto.CryptoIdentity;
+import io.bosonnetwork.vertx.BosonVerticle;
 
-public class ProxySession extends VerticleBase {
+public class ProxySession extends BosonVerticle {
 	private static final int PERIODIC_CHECK_INTERVAL = 15 * 1000;	// 15 seconds
 	private static final int IDLE_CHECK_INTERVAL = 60 * 1000;		// 1 minute
 	private static final int STOP_DELAY = 5 * 1000; 				// 5 seconds
@@ -208,7 +208,8 @@ public class ProxySession extends VerticleBase {
 			listeners.remove(listener);
 	}
 
-	public Future<Void> start() {
+	@Override
+	public Future<Void> deploy() {
 		proxyClient = vertx.createNetClient(new NetClientOptions()
 				.setSsl(false)
 				.setConnectTimeout(16000)
@@ -232,7 +233,8 @@ public class ProxySession extends VerticleBase {
 		return connect();
 	}
 
-	public Future<Void> stop() {
+	@Override
+	public Future<Void> undeploy() {
 		if (!running)
 			return Future.succeededFuture();
 
@@ -249,13 +251,13 @@ public class ProxySession extends VerticleBase {
 			connected = false;
 			endpoint = null;
 			namedEndpoint = null;
-			context.runOnContext(unused -> {
+			runOnContext(unused -> {
 				if (connectionStatusListener != null)
 					connectionStatusListener.disconnected();
 			});
 		}
 
-		return Future.join(proxyClient.shutdown(), upstreamClient.shutdown())
+		return Future.join(proxyClient.close(), upstreamClient.close())
 				.andThen(ar -> {
 					proxyClient = null;
 					upstreamClient = null;
@@ -344,7 +346,7 @@ public class ProxySession extends VerticleBase {
 			if (ar.succeeded()) {
 				int connectionId = nextConnectionId++;
 				log.info("Created new proxy connection {} to service {}@{}", connectionId, servicePeerId, serviceAddress);
-				ProxyConnection connection = new ProxyConnection(connectionId, context, peerContext, sessionContext, ar.result(), connectionHandler);
+				ProxyConnection connection = new ProxyConnection(connectionId, vertxContext, peerContext, sessionContext, ar.result(), connectionHandler);
 				connections.put(connection, Boolean.TRUE);
 			} else {
 				connectFailures++;
@@ -401,7 +403,7 @@ public class ProxySession extends VerticleBase {
 			tryAnnouncePeer();
 		}
 
-		context.runOnContext(unused -> {
+		runOnContext(unused -> {
 			if (connectionStatusListener != null)
 				connectionStatusListener.connected();
 		});
@@ -423,7 +425,7 @@ public class ProxySession extends VerticleBase {
 				if (danglingTimestamp > 0 && System.currentTimeMillis() - danglingTimestamp >= STOP_DELAY) {
 					log.info("Proxy session {} disconnected, reset session to reconnect", servicePeerId);
 					reset();
-					context.runOnContext(v -> {
+					runOnContext(v -> {
 						if (connectionStatusListener != null)
 							connectionStatusListener.disconnected();
 					});

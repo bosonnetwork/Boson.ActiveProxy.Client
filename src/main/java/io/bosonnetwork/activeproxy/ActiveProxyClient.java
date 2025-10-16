@@ -38,7 +38,7 @@ import io.bosonnetwork.Node;
 import io.bosonnetwork.NodeInfo;
 import io.bosonnetwork.PeerInfo;
 import io.bosonnetwork.Result;
-import io.bosonnetwork.utils.vertx.VertxFuture;
+import io.bosonnetwork.vertx.VertxFuture;
 
 public class ActiveProxyClient  {
 	private final Vertx vertx;

@@ -53,8 +53,6 @@ public class ProxyConnection {
 
 	private long lastReceiveTimestamp;
 	private int disconnectConfirms;
-	private long readBytes;
-	private long writeBytes;
 
 	private static final Logger log = LoggerFactory.getLogger(ProxyConnection.class);
 
@@ -341,8 +339,6 @@ public class ProxyConnection {
 		log.debug("Connection {} connecting to the upstream...", id);
 		handler.connectUpstream().andThen(ar -> {
 			disconnectConfirms = 0;
-			readBytes = 0;
-			writeBytes = 0;
 
 			if (ar.succeeded()) {
 				NetSocket socket = ar.result();
@@ -365,7 +361,7 @@ public class ProxyConnection {
 
 		upstreamSocket.write(Buffer.buffer(packet.data())).andThen(ar -> {
 			if (ar.succeeded()) {
-				writeBytes += packet.data().length;
+				log.trace("Connection {} sent {} bytes data to upstream", id, packet.data().length);
 			} else {
 				log.error("Connection {} failed to write data to upstream: {}", id, ar.cause().getMessage());
 				upstreamSocket.close();
@@ -432,7 +428,6 @@ public class ProxyConnection {
 			return;
 		}
 
-		readBytes += data.length();
 		sendData(data.getBytes());
 	}
 
@@ -458,8 +453,7 @@ public class ProxyConnection {
 			upstreamSocket.close();
 
 		if (++disconnectConfirms == 3) {
-			log.trace(">>>>>>>> Connection {} disconnect confirmed, total read/write: {}/{}, now change state to idle.",
-					id, readBytes, writeBytes);
+			log.trace("Connection {} disconnect confirmed, change state to idle.", id);
 			state = State.Idling;
 			disconnectConfirms = 0;
 			vertxContext.runOnContext(v -> handler.idle(this));
