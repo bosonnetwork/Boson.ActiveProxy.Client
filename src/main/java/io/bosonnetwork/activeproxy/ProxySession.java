@@ -370,12 +370,11 @@ public class ProxySession extends BosonVerticle {
 
 	private void connectionChallengeHandler(ProxyConnection connection, byte[] challenge) {
 		if (!connected) {
-			byte[] userSig = userIdentity.sign(challenge);
 			byte[] deviceSig = deviceIdentity.sign(challenge);
 
 			clientSessionKeyPair = CryptoBox.KeyPair.random();
 			connection.sendAuth(userIdentity.getId(), deviceIdentity.getId(), clientSessionKeyPair.publicKey(),
-					config.isNameAccessEnabled(), userSig, deviceSig, peerContext);
+					config.isNameAccessEnabled(), deviceSig, peerContext);
 		} else {
 			byte[] deviceSig = deviceIdentity.sign(challenge);
 			connection.sendAttach(deviceIdentity.getId(), clientSessionKeyPair.publicKey(), deviceSig, peerContext);
