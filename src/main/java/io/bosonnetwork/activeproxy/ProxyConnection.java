@@ -152,10 +152,10 @@ public class ProxyConnection {
 		});
 	}
 
-	protected Future<Void> sendAuth(Id userId, Id deviceId, CryptoBox.PublicKey clientSessionPk, boolean nameAccess,
-						 byte[] userSig, byte[] deviceSig, CryptoContext peerContext) {
+	protected Future<Void> sendAuth(Id userId, Id deviceId, CryptoBox.PublicKey clientSessionPk,
+									boolean nameAccess, byte[] deviceSig, CryptoContext peerContext) {
 		state = State.Authenticating;
-		Packet.Auth auth = new Packet.Auth(Packet.VERSION, userId, deviceId, clientSessionPk, nameAccess, userSig, deviceSig);
+		Packet.Auth auth = new Packet.Auth(Packet.VERSION, userId, deviceId, clientSessionPk, nameAccess, deviceSig);
 		return sendPacket(PacketType.AUTH, auth.encode(peerContext));
 	}
 

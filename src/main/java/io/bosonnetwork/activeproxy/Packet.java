@@ -93,14 +93,14 @@ public class Packet {
 	 *     - userId
 	 *     - clientSessionPk
 	 *     - nameAccess
-	 *     - userSig[challenge]
+	 *     # - userSig[challenge]
 	 *     - deviceSig[challenge]
 	 *     - padding
 	 */
-	public record Auth(int version, Id userId, Id deviceId, CryptoBox.PublicKey clientSessionPk, boolean nameAccess,
-					   byte[] userSig, byte[] deviceSig) {
+	public record Auth(int version, Id userId, Id deviceId, CryptoBox.PublicKey clientSessionPk,
+					   boolean nameAccess, byte[] deviceSig) {
 		private static final int SECRET_BYTES = Short.BYTES + Id.BYTES + CryptoBox.PublicKey.BYTES +
-				Byte.BYTES + Signature.BYTES + Signature.BYTES;
+				Byte.BYTES + Signature.BYTES;
 		public static int BYTES = HEADER_BYTES +  // package header
 				Id.BYTES +  // plain device id
 				CryptoBox.Nonce.BYTES + CryptoBox.MAC_BYTES + // encryption header
@@ -122,9 +122,6 @@ public class Packet {
 
 			secret[pos++] = (byte)(nameAccess ? 1 : 0);
 
-			System.arraycopy(userSig, 0, secret, pos, userSig.length);
-			pos += userSig.length;
-
 			System.arraycopy(deviceSig, 0, secret, pos, deviceSig.length);
 			pos += deviceSig.length;
 
@@ -143,8 +140,7 @@ public class Packet {
 		}
 
 		public boolean verify(byte[] challenge) {
-			return Signature.verify(challenge, userSig, userId.toSignatureKey()) &&
-					Signature.verify(challenge, deviceSig, deviceId.toSignatureKey());
+			return Signature.verify(challenge, deviceSig, deviceId.toSignatureKey());
 		}
 
 		public static Auth decode(Buffer packet, Identity identity) throws MalformedPacketException {
@@ -176,12 +172,9 @@ public class Packet {
 
 			boolean nameAccess = Byte.toUnsignedInt(secret[pos++]) == 1;
 
-			byte[] userSig = Arrays.copyOfRange(secret, pos, pos + Signature.BYTES);
-			pos += Signature.BYTES;
-
 			byte[] deviceSig = Arrays.copyOfRange(secret, pos, pos + Signature.BYTES);
 
-			return new Auth(version, userId, deviceId, clientSessionPk, nameAccess, userSig, deviceSig);
+			return new Auth(version, userId, deviceId, clientSessionPk, nameAccess, deviceSig);
 		}
 	}
 
