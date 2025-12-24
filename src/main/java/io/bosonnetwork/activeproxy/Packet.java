@@ -46,6 +46,7 @@ public class Packet {
 	public static final int HEADER_BYTES = Short.BYTES + Byte.BYTES;
 
 	public static PacketType getType(Buffer packet) throws MalformedPacketException {
+		// noinspection DuplicatedCode
 		if (packet.length() < HEADER_BYTES)
 			throw new MalformedPacketException("packet too short");
 
@@ -72,6 +73,7 @@ public class Packet {
 		}
 
 		public static Challenge decode(Buffer packet) throws MalformedPacketException {
+			// noinspection DuplicatedCode
 			if (packet.length() < MIN_BYTES)
 				throw new MalformedPacketException("packet too short");
 
@@ -107,6 +109,7 @@ public class Packet {
 				SECRET_BYTES;
 
 		public Buffer encode(CryptoContext cryptoContext) {
+			// noinspection DuplicatedCode
 			byte[] padding = randomPadding(BYTES);
 			byte[] secret = new byte[SECRET_BYTES + padding.length];
 
@@ -144,6 +147,7 @@ public class Packet {
 		}
 
 		public static Auth decode(Buffer packet, Identity identity) throws MalformedPacketException {
+			// noinspection DuplicatedCode
 			if (packet.length() < BYTES)
 				throw new MalformedPacketException("packet too short");
 
@@ -196,6 +200,7 @@ public class Packet {
 				MIN_SECRET_BYTES;
 
 		public Buffer encode(CryptoContext cryptoContext) {
+			// noinspection DuplicatedCode
 			int endpointsSize = (endpoint != null ? endpoint.length() : 0) +
 					(namedEndpoint != null ? namedEndpoint.length() : 0);
 
@@ -239,6 +244,7 @@ public class Packet {
 		}
 
 		public static AuthAck decode(Buffer packet, CryptoContext cryptoContext) throws MalformedPacketException {
+			// noinspection DuplicatedCode
 			if (packet.length() < MIN_BYTES)
 				throw new MalformedPacketException("packet too short");
 
@@ -310,6 +316,7 @@ public class Packet {
 				SECRET_BYTES;
 
 		public Buffer encode(CryptoContext cryptoContext) {
+			// noinspection DuplicatedCode
 			byte[] padding = randomPadding(BYTES);
 			byte[] secret = new byte[SECRET_BYTES + padding.length];
 
@@ -339,6 +346,7 @@ public class Packet {
 		}
 
 		public static Attach decode(Buffer packet, Identity identity) throws MalformedPacketException {
+			// noinspection DuplicatedCode
 			if (packet.length() < BYTES)
 				throw new MalformedPacketException("packet too short");
 
@@ -418,6 +426,7 @@ public class Packet {
 				SECRET_BYTES;
 
 		public Buffer encode(CryptoContext cryptoContext) {
+			// noinspection DuplicatedCode
 			byte[] padding = randomPadding(BYTES);
 			byte[] secret = new byte[SECRET_BYTES + padding.length];
 
@@ -441,6 +450,7 @@ public class Packet {
 		}
 
 		public static Connect decode(Buffer packet, CryptoContext cryptoContext) throws MalformedPacketException {
+			// noinspection DuplicatedCode
 			if (packet.length() < BYTES)
 				throw new MalformedPacketException("packet too short");
 
@@ -483,6 +493,7 @@ public class Packet {
 		}
 
 		public Buffer encode() {
+			// noinspection DuplicatedCode
 			byte[] padding = randomPadding(BYTES);
 			int size = BYTES + padding.length;
 			Buffer packet = Buffer.buffer(size);
@@ -542,6 +553,7 @@ public class Packet {
 			CryptoBox.Nonce.BYTES + CryptoBox.MAC_BYTES;
 
 		public Buffer encode(CryptoContext cryptoContext) {
+			// noinspection DuplicatedCode
 			byte[] cipher = cryptoContext.encrypt(data);
 			int size = HEADER_BYTES + cipher.length;
 			Buffer packet = Buffer.buffer(size);
@@ -552,6 +564,7 @@ public class Packet {
 		}
 
 		public static Data decode(Buffer packet, CryptoContext cryptoContext) throws MalformedPacketException {
+			// noinspection DuplicatedCode
 			if (packet.length() < MIN_BYTES)
 				throw new MalformedPacketException("packet too short");
 
@@ -574,6 +587,7 @@ public class Packet {
 				MIN_SECRET_BYTES;
 
 		public Buffer encode(CryptoContext cryptoContext) {
+			// noinspection DuplicatedCode
 			int messageLen = message != null ? message.length() : 0;
 			byte[] padding = randomPadding(MIN_BYTES + messageLen);
 			byte[] secret = new byte[MIN_SECRET_BYTES + messageLen + padding.length];
@@ -603,6 +617,7 @@ public class Packet {
 		}
 
 		public static Error decode(Buffer packet, CryptoContext cryptoContext) throws MalformedPacketException {
+			// noinspection DuplicatedCode
 			if (packet.length() < MIN_BYTES)
 				throw new MalformedPacketException("packet too short");
 
@@ -633,6 +648,7 @@ public class Packet {
 	}
 
 	private static Buffer encodeWithEmptyPayload(PacketType type) {
+		// noinspection DuplicatedCode
 		byte[] padding = randomPadding(HEADER_BYTES);
 		int size = HEADER_BYTES + padding.length;
 

@@ -42,7 +42,7 @@ public class ConfigurationTests {
 				.servicePeerId(Id.random())
 				.serviceHost("10.0.0.1")
 				.servicePort(10090)
-				.generateUserKey()
+				.userId(Id.random())
 				.generateDeviceKey()
 				.upstreamHost("192.168.1.8")
 				.upstreamPort(8888)
