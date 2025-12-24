@@ -1,11 +1,14 @@
 package io.bosonnetwork.activeproxy;
 
 import java.io.InputStream;
+import java.net.Inet4Address;
 import java.util.Map;
+import java.util.Objects;
 
 import io.vertx.core.Vertx;
 import io.vertx.core.VertxOptions;
 
+import io.bosonnetwork.utils.AddressUtils;
 import io.bosonnetwork.utils.Json;
 
 public class TestClientLauncher {
@@ -15,6 +18,12 @@ public class TestClientLauncher {
 	private static Configuration loadConfig() throws Exception{
 		try (InputStream s = TestClientLauncher.class.getClassLoader().getResourceAsStream("testConfig.yaml")) {
 			Map<String, Object> map = Json.yamlMapper().readValue(s, Json.mapType());
+			// fix the server host
+			if (map.containsKey("service")) {
+				@SuppressWarnings("unchecked")
+				Map<String, Object> service = (Map<String, Object>) map.get("service");
+				service.put("host", Objects.requireNonNull(AddressUtils.getDefaultRouteAddress(Inet4Address.class)).getHostAddress());
+			}
 			return Configuration.fromMap(map);
 		} catch (Exception e) {
 			System.err.println("Failed to load configuration file: " + e.getMessage());

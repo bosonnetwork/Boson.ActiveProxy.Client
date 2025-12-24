@@ -29,105 +29,90 @@ import java.util.Objects;
 import io.bosonnetwork.Id;
 import io.bosonnetwork.crypto.Signature;
 import io.bosonnetwork.utils.Base58;
+import io.bosonnetwork.utils.ConfigMap;
 import io.bosonnetwork.utils.Hex;
 
 public class Configuration {
 	private static final String DEFAULT_SCHEME = "tcp://";
 
-	private final Id servicePeerId;
+	private Id servicePeerId;
 	private String serviceHost; // optional
 	private int servicePort;	// optional
 
-	private final Signature.KeyPair userKey;
-	private final Signature.KeyPair deviceKey;
+	private Id userId;
+	private Signature.KeyPair userKey;
+	private Signature.KeyPair deviceKey;
 
-	private final String upstreamHost;
-	private final int upstreamPort;
-	private final String upstreamScheme;
+	private String upstreamHost;
+	private int upstreamPort;
+	private String upstreamScheme;
 
-	private final boolean nameAccess;
-	private final boolean announcePeer;
+	private boolean nameAccess;
+	private boolean announcePeer;
 
-	private Configuration(Id servicePeerId, String serviceHost, int servicePort,
-						  Signature.KeyPair userKey, Signature.KeyPair deviceKey,
-						  String upstreamHost, int upstreamPort, String upstreamScheme,
-						  boolean nameAccess, boolean announcePeer) {
-		Objects.requireNonNull(servicePeerId, "servicePeerId");
-		if (serviceHost != null && (servicePort <= 0 || servicePort > 65535))
-			throw new IllegalArgumentException("Invalid servicePort");
-		Objects.requireNonNull(userKey, "userKey");
-		Objects.requireNonNull(deviceKey, "deviceKey");
-		Objects.requireNonNull(upstreamHost, "upstreamHost");
-		if (upstreamPort <= 0 || upstreamPort > 65535)
-			throw new IllegalArgumentException("Invalid upstreamPort");
-
-		this.servicePeerId = servicePeerId;
-		this.serviceHost = serviceHost;
-		this.servicePort = servicePort;
-		this.userKey = userKey;
-		this.deviceKey = deviceKey;
-		this.upstreamHost = upstreamHost;
-		this.upstreamPort = upstreamPort;
-		this.upstreamScheme = upstreamScheme == null ? DEFAULT_SCHEME : upstreamScheme;
-		this.nameAccess = nameAccess;
-		this.announcePeer = announcePeer;
+	private Configuration() {
 	}
 
-	public static Configuration fromMap(Map<String, Object> config) throws IllegalArgumentException {
-		try {
-			@SuppressWarnings("unchecked")
-			Map<String, Object> service = (Map<String, Object>) config.get("service");
-			if (service == null || service.isEmpty())
-				throw new IllegalArgumentException("Missing service");
+	public static Configuration fromMap(Map<String, Object> map) throws IllegalArgumentException {
+		ConfigMap cm = new ConfigMap(map);
+		Configuration config = new Configuration();
 
-			String s = (String) service.get("peerId");
-			if (s == null || s.isEmpty())
-				throw new IllegalArgumentException("Missing service peerId");
-			Id servicePeerId = Id.of(s);
+		ConfigMap service = cm.getObject("service");
+		if (service == null || service.isEmpty())
+			throw new IllegalArgumentException("Missing service");
 
-			// optional
-			String serviceHost = (String) service.get("host");
-			int servicePort = (int) service.get("port");
+		config.servicePeerId = service.getId("peerId");
+		// optional
+		config.serviceHost = service.getString("host", null);
+		config.servicePort = service.getPort("port", 0);
 
-			@SuppressWarnings("unchecked")
-			Map<String, Object> client = (Map<String, Object>) config.get("client");
-			if (client == null || client.isEmpty())
-				throw new IllegalArgumentException("Missing client");
+		ConfigMap client = cm.getObject("client");
+		config.userId = client.getId("userId", null);
+		String sk = client.getString("userPrivateKey", null);
+		if (sk == null) {
+			if (config.userId == null)
+				throw new IllegalArgumentException("Missing client userId or userPrivateKey");
+		} else {
+			try {
+				config.userKey = Signature.KeyPair.fromPrivateKey(sk.startsWith("0x") ?
+						Hex.decode(sk, 2, sk.length() - 2) :
+						Base58.decode(sk));
+			} catch (Exception e) {
+				throw new IllegalArgumentException("config error, invalid client userPrivateKey", e);
+			}
 
-			s = (String) client.get("userPrivateKey");
-			if (s == null || s.isEmpty())
-				throw new IllegalArgumentException("Missing client userPrivateKey");
-			Signature.KeyPair userKey = Signature.KeyPair.fromPrivateKey(s.startsWith("0x") ?
-					Hex.decode(s, 2, s.length() - 2) : Base58.decode(s));
-
-			s = (String) client.get("devicePrivateKey");
-			if (s == null || s.isEmpty())
-				throw new IllegalArgumentException("Missing client devicePrivateKey");
-			Signature.KeyPair deviceKey = Signature.KeyPair.fromPrivateKey(s.startsWith("0x") ?
-					Hex.decode(s, 2, s.length() - 2) : Base58.decode(s));
-
-			@SuppressWarnings("unchecked")
-			Map<String, Object> upstream = (Map<String, Object>) config.get("upstream");
-			if (upstream == null || upstream.isEmpty())
-				throw new IllegalArgumentException("Missing upstream");
-
-			String upstreamHost = (String) upstream.get("host");
-			if (upstreamHost == null || upstreamHost.isEmpty())
-				throw new IllegalArgumentException("Missing upstream host");
-			int upstreamPort = (int) upstream.get("port");
-			if (upstreamPort <= 0)
-				throw new IllegalArgumentException("Invalid upstream port");
-
-			String upstreamScheme = (String) upstream.get("scheme");
-
-			boolean nameAccess = (boolean) config.getOrDefault("nameAccess", false);
-			boolean announcePeer = (boolean) config.getOrDefault("announcePeer", false);
-
-			return new Configuration(servicePeerId, serviceHost, servicePort, userKey, deviceKey,
-					upstreamHost, upstreamPort, upstreamScheme, nameAccess, announcePeer);
-		} catch (ClassCastException e) {
-			throw new IllegalArgumentException("Invalid config", e);
+			Id uid = Id.of(config.userKey.publicKey().bytes());
+			if (config.userId != null && !config.userId.equals(uid))
+				throw new IllegalArgumentException("Both client userId and userPrivateKey are set, but they don't match");
+			config.userId = uid;
 		}
+
+		sk = client.getString("devicePrivateKey", null);
+		if (sk == null || sk.isEmpty())
+			throw new IllegalArgumentException("Missing client devicePrivateKey");
+
+		try {
+			config.deviceKey = Signature.KeyPair.fromPrivateKey(sk.startsWith("0x") ?
+					Hex.decode(sk, 2, sk.length() - 2) :
+					Base58.decode(sk));
+		} catch (Exception e) {
+			throw new IllegalArgumentException("config error, invalid client devicePrivateKey", e);
+		}
+
+		ConfigMap upstream = cm.getObject("upstream");
+		if (upstream == null || upstream.isEmpty())
+			throw new IllegalArgumentException("Missing upstream");
+
+		config.upstreamHost = upstream.getString("host", null);
+		if (config.upstreamHost == null || config.upstreamHost.isEmpty())
+			throw new IllegalArgumentException("Missing upstream host");
+		config.upstreamPort = upstream.getPort("port");
+		config.upstreamScheme = upstream.getString("scheme", DEFAULT_SCHEME);
+
+		config.nameAccess = cm.getBoolean("nameAccess", false);
+		config.announcePeer = cm.getBoolean("announcePeer", false);
+
+		return config;
 	}
 
 	public Map<String, Object> toMap() {
@@ -142,7 +127,10 @@ public class Configuration {
 		map.put("service", subMap);
 
 		subMap = new LinkedHashMap<>();
-		subMap.put("userPrivateKey", Base58.encode(userKey.privateKey().bytes()));
+		if (userId != null)
+			subMap.put("userId", userId.toString());
+		if (userKey != null)
+			subMap.put("userPrivateKey", Base58.encode(userKey.privateKey().bytes()));
 		subMap.put("devicePrivateKey", Base58.encode(deviceKey.privateKey().bytes()));
 		map.put("client", subMap);
 
@@ -175,6 +163,10 @@ public class Configuration {
 
 	protected void setServicePort(int servicePort) {
 		this.servicePort = servicePort;
+	}
+
+	public Id getUserId() {
+		return userId;
 	}
 
 	public Signature.KeyPair getUserKey() {
@@ -210,21 +202,14 @@ public class Configuration {
 	}
 
 	public static class Builder {
-		private Id servicePeerId;
-		private String serviceHost; // optional
-		private int servicePort;	// optional
-
-		private Signature.KeyPair userKey;
-		private Signature.KeyPair deviceKey;
-
-		private String upstreamHost;
-		private int upstreamPort;
-		private String upstreamScheme;
-
-		private boolean nameAccess;
-		private boolean announcePeer;
+		private Configuration config;
 
 		private Builder() {
+			config = new Configuration();
+		}
+
+		private Configuration config() {
+			return config == null ? config = new Configuration() : config;
 		}
 
 		public Builder service(Id peerId, String host, int port) {
@@ -236,13 +221,13 @@ public class Configuration {
 
 		public Builder servicePeerId(Id servicePeerId) {
 			Objects.requireNonNull(servicePeerId, "servicePeerId");
-			this.servicePeerId = servicePeerId;
+			config().servicePeerId = servicePeerId;
 			return this;
 		}
 
 		public Builder serviceHost(String serviceHost) {
 			Objects.requireNonNull(serviceHost, "serviceHost");
-			this.serviceHost = serviceHost;
+			config().serviceHost = serviceHost;
 			return this;
 		}
 
@@ -250,13 +235,21 @@ public class Configuration {
 			if (servicePort <= 0 || servicePort > 65535)
 				throw new IllegalArgumentException("Invalid servicePort");
 
-			this.servicePort = servicePort;
+			config().servicePort = servicePort;
+			return this;
+		}
+
+		public Builder userId(Id userId) {
+			Objects.requireNonNull(userId, "userId");
+			config().userId = userId;
+			config().userKey = null;
 			return this;
 		}
 
 		public Builder userKey(Signature.KeyPair userKey) {
 			Objects.requireNonNull(userKey, "userKey");
-			this.userKey = userKey;
+			config().userKey = userKey;
+			config().userId = Id.of(userKey.publicKey().bytes());
 			return this;
 		}
 
@@ -282,7 +275,7 @@ public class Configuration {
 
 		public Builder deviceKey(Signature.KeyPair deviceKey) {
 			Objects.requireNonNull(deviceKey, "deviceKey");
-			this.deviceKey = deviceKey;
+			config().deviceKey = deviceKey;
 			return this;
 		}
 
@@ -315,7 +308,7 @@ public class Configuration {
 
 		public Builder upstreamHost(String upstreamHost) {
 			Objects.requireNonNull(upstreamHost, "upstreamHost");
-			this.upstreamHost = upstreamHost;
+			config().upstreamHost = upstreamHost;
 			return this;
 		}
 
@@ -323,33 +316,38 @@ public class Configuration {
 			if (upstreamPort <= 0 || upstreamPort > 65535)
 				throw new IllegalArgumentException("Invalid upstreamPort");
 
-			this.upstreamPort = upstreamPort;
+			config().upstreamPort = upstreamPort;
 			return this;
 		}
 
 		public Builder upstreamScheme(String scheme) {
 			Objects.requireNonNull(scheme, "scheme");
-			this.upstreamScheme = scheme;
+			config().upstreamScheme = scheme;
 			return this;
 		}
 
 		public Builder nameAccess(boolean nameAccess) {
-			this.nameAccess = nameAccess;
+			config().nameAccess = nameAccess;
 			return this;
 		}
 
 		public Builder announcePeer(boolean announcePeer) {
-			this.announcePeer = announcePeer;
+			config().announcePeer = announcePeer;
 			return this;
 		}
 
+		private boolean verify() {
+			return config().servicePeerId != null && config().userId != null && config().deviceKey != null
+					&& config().upstreamHost != null && config().upstreamPort > 0;
+		}
+
 		public Configuration build() {
-			try {
-				return new Configuration(servicePeerId, serviceHost, servicePort, userKey, deviceKey,
-						upstreamHost, upstreamPort, upstreamScheme, nameAccess, announcePeer);
-			} catch (IllegalArgumentException | NullPointerException e) {
-				throw new IllegalStateException("Incomplete configuration", e);
-			}
+			if (!verify())
+				throw new IllegalStateException("Incomplete configuration");
+
+			Configuration c = config();
+			config = null;
+			return c;
 		}
 	}
 }

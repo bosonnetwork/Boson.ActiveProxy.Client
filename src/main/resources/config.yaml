@@ -12,7 +12,8 @@ service:
 # Client credentials.
 # Both the user and device private keys are required.
 client:
-  userPrivateKey: 5nzta5SD3T2Dky66ZmkDN7rhyFZjHLUvXENosNTA495boCuP8DA8msqu85L7ZhydxiLw1MxGYUhsDydM6gbTpGP5
+  # userPrivateKey: 5nzta5SD3T2Dky66ZmkDN7rhyFZjHLUvXENosNTA495boCuP8DA8msqu85L7ZhydxiLw1MxGYUhsDydM6gbTpGP5
+  userId: AAqCZmUwD5hPAwNZBUsf1xsqsuWMUK74za3r6b9dgioD
   devicePrivateKey: 65z3qLiMmn6zZJNWHxY9GsXst9u7QKDfnk8co4JqNAKjL1xTZvj2cxs3a9svGNrkGheCcM1fpZV1dSGheYZ7EFFx
 
 # Upstream server configuration.

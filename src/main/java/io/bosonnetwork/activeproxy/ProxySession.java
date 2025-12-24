@@ -62,7 +62,7 @@ public class ProxySession extends BosonVerticle {
 	private Node node;
 	private Configuration config;
 
-	private Identity userIdentity;
+	private Id userId;
 	private Identity deviceIdentity;
 	private SocketAddress serviceAddress;
 	private SocketAddress upstreamAddress;
@@ -103,7 +103,7 @@ public class ProxySession extends BosonVerticle {
 		this.node = node;
 		this.config = config;
 
-		this.userIdentity = new CryptoIdentity(config.getUserKey());
+		this.userId = config.getUserId();
 		this.deviceIdentity = new CryptoIdentity(config.getDeviceKey());
 		this.servicePeerId = config.getServicePeerId();
 		this.serviceAddress = SocketAddress.inetSocketAddress(config.getServicePort(), config.getServiceHost());
@@ -369,14 +369,13 @@ public class ProxySession extends BosonVerticle {
 	}
 
 	private void connectionChallengeHandler(ProxyConnection connection, byte[] challenge) {
-		if (!connected) {
-			byte[] deviceSig = deviceIdentity.sign(challenge);
+		byte[] deviceSig = deviceIdentity.sign(challenge);
 
+		if (!connected) {
 			clientSessionKeyPair = CryptoBox.KeyPair.random();
-			connection.sendAuth(userIdentity.getId(), deviceIdentity.getId(), clientSessionKeyPair.publicKey(),
+			connection.sendAuth(userId, deviceIdentity.getId(), clientSessionKeyPair.publicKey(),
 					config.isNameAccessEnabled(), deviceSig, peerContext);
 		} else {
-			byte[] deviceSig = deviceIdentity.sign(challenge);
 			connection.sendAttach(deviceIdentity.getId(), clientSessionKeyPair.publicKey(), deviceSig, peerContext);
 		}
 	}
@@ -454,7 +453,7 @@ public class ProxySession extends BosonVerticle {
 
 		serviceAddress = null;
 		upstreamAddress = null;
-		userIdentity = null;
+		userId = null;
 		deviceIdentity = null;
 		node = null;
 		config = null;
