@@ -23,21 +23,13 @@
 package io.bosonnetwork.activeproxy;
 
 import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.List;
-import java.util.concurrent.CompletableFuture;
 
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.bosonnetwork.Id;
-import io.bosonnetwork.Network;
 import io.bosonnetwork.Node;
-import io.bosonnetwork.NodeInfo;
-import io.bosonnetwork.PeerInfo;
-import io.bosonnetwork.Result;
 import io.bosonnetwork.vertx.VertxFuture;
 
 public class ActiveProxyClient  {
@@ -56,73 +48,33 @@ public class ActiveProxyClient  {
 		this.session = new ProxySession(node, config);
 	}
 
-	private Future<Result<NodeInfo>> findNode(Id nodeId) {
-		return Future.fromCompletionStage(node.findNode(nodeId));
-	}
-
-	private Future<List<PeerInfo>> findPeer(Id peerId) {
-		return Future.fromCompletionStage(node.findPeer(peerId));
-	}
-
-	private Future<Void> resolvePeerInfo(List<PeerInfo> peers, int index) {
-		if (index >= peers.size())
-			return Future.failedFuture("No available peer");
-
-		PeerInfo peer = peers.get(index);
-		log.info("Trying to resolve the peer {} ...", peer);
-		if (peer.hasAlternativeURI()) {
-			try {
-				URI uri = new URI(peer.getAlternativeURI().toLowerCase());
-				if (uri.getScheme().equals("tcp") && uri.getPort() > 0) {
-					config.setServiceHost(uri.getHost());
-					config.setServicePort(uri.getPort());
-					//noinspection LoggingSimilarMessage
-					log.info("Resolved the peer {} to {}:{}", peer, config.getServiceHost(), config.getServicePort());
-					return Future.succeededFuture();
-				} else {
-					log.error("Peer info with unsupported alternative URL: {}", peer);
-					return resolvePeerInfo(peers, index + 1);
-				}
-			} catch (URISyntaxException e) {
-				log.error("Peer info with invalid alternative URL: {}", peer);
-				return resolvePeerInfo(peers, index + 1);
-			}
-		} else {
-			log.info("Looking up node {} ...", peer.getNodeId());
-			return findNode(peer.getNodeId()).compose(result -> {
-				if (result.isEmpty()) {
-					return resolvePeerInfo(peers, index + 1);
-				} else {
-					config.setServiceHost(result.get(Network.IPv4).getHost());
-					config.setServicePort(peer.getPort());
-					//noinspection LoggingSimilarMessage
-					log.info("Resolved the peer {} to {}:{}", peer, config.getServiceHost(), config.getServicePort());
-					return Future.succeededFuture();
-				}
-			}).recover(e -> {
-				log.error("Failed to find node {}: {}", peer.getNodeId(), e.getMessage());
-				return resolvePeerInfo(peers, index + 1);
-			});
-		}
-	}
-
-	public CompletableFuture<Void> start() {
-		Future<Void> resolveFuture;
+	private Future<Void> resolvePeer() {
 		if (config.getServiceHost() == null || config.getServicePort() == 0) {
 			log.info("Looking up service peer {} ...", config.getServicePeerId());
-			resolveFuture = findPeer(config.getServicePeerId()).compose(peers -> {
-				if (peers.isEmpty()) {
+			return Future.fromCompletionStage(node.findPeer(config.getServicePeerId())).compose(peer -> {
+				if (peer == null) {
 					log.error("Service peer not found {}", config.getServicePeerId());
 					return Future.failedFuture("Service peer not found: " + config.getServicePeerId());
 				}
 
-				return resolvePeerInfo(peers, 0);
+				URI uri = URI.create(peer.getEndpoint());
+				if (!uri.getScheme().equals("tcp") || uri.getPort() <= 0) {
+					log.error("Service peer endpoint {} is invalid", peer.getEndpoint());
+					return Future.failedFuture("Service peer endpoint is invalid: " + peer.getEndpoint());
+				}
+
+				config.setServiceHost(uri.getHost());
+				config.setServicePort(uri.getPort());
+				return Future.succeededFuture();
 			});
 		} else {
-			resolveFuture = Future.succeededFuture();
+			return Future.succeededFuture();
 		}
+	}
 
-		Future<Void> deployFuture = resolveFuture.compose(v ->
+	public VertxFuture<Void> start() {
+
+		Future<Void> deployFuture = resolvePeer().compose(v ->
 			vertx.deployVerticle(session).andThen(ar -> {
 				if (ar.failed())
 					session.close();
@@ -132,7 +84,7 @@ public class ActiveProxyClient  {
 		return VertxFuture.of(deployFuture);
 	}
 
-	public CompletableFuture<Void> stop() {
+	public VertxFuture<Void> stop() {
 		if (!session.isRunning())
 			return VertxFuture.succeededFuture();
 

@@ -17,7 +17,7 @@ import io.bosonnetwork.crypto.Signature;
 import io.bosonnetwork.utils.Base58;
 import io.bosonnetwork.utils.FileUtils;
 import io.bosonnetwork.utils.Hex;
-import io.bosonnetwork.utils.Json;
+import io.bosonnetwork.json.Json;
 
 public class ConfigurationTests {
 	private static final Path testDir = Path.of(System.getProperty("java.io.tmpdir"), "boson", "ActiveProxyClient");
