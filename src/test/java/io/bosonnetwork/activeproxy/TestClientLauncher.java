@@ -9,7 +9,7 @@ import io.vertx.core.Vertx;
 import io.vertx.core.VertxOptions;
 
 import io.bosonnetwork.utils.AddressUtils;
-import io.bosonnetwork.utils.Json;
+import io.bosonnetwork.json.Json;
 
 public class TestClientLauncher {
 	private static Vertx vertx;

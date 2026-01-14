@@ -23,7 +23,6 @@
 package io.bosonnetwork.activeproxy;
 
 import java.net.InetAddress;
-import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -393,10 +392,16 @@ public class ProxySession extends BosonVerticle {
 				servicePeerId, maxConnections, endpoint, namedEndpoint != null ? namedEndpoint : "N/A");
 
 		if (config.isAnnouncePeer()) {
-			URI endpointURI = URI.create(endpoint);
-			URI namedEndpointURI = namedEndpoint != null ? URI.create(namedEndpoint) : null;
-			this.peerInfo = PeerInfo.create(config.getDeviceKey(), servicePeerId, node.getId(),
-					endpointURI.getPort(), (namedEndpointURI != null ? namedEndpointURI : endpointURI).toString());
+			PeerInfo.Builder pb = PeerInfo.builder()
+					.key(config.getDeviceKey())
+					.node(node);
+			if (namedEndpoint != null) {
+				pb.endpoint(namedEndpoint);
+				pb.extra(Map.of("altEndpoint", endpoint));
+			} else {
+				pb.endpoint(endpoint);
+			}
+			this.peerInfo = pb.build();
 
 			tryAnnouncePeer();
 		}
