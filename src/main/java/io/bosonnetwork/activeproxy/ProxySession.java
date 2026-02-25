@@ -208,7 +208,7 @@ public class ProxySession extends BosonVerticle {
 	}
 
 	@Override
-	public Future<Void> deploy() {
+	protected Future<Void> deploy() {
 		proxyClient = vertx.createNetClient(new NetClientOptions()
 				.setSsl(false)
 				.setConnectTimeout(16000)
@@ -233,7 +233,7 @@ public class ProxySession extends BosonVerticle {
 	}
 
 	@Override
-	public Future<Void> undeploy() {
+	protected Future<Void> undeploy() {
 		if (!running)
 			return Future.succeededFuture();
 
