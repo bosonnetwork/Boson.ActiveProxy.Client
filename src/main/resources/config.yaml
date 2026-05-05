@@ -10,7 +10,7 @@ service:
   port: 8090
 
 # Client credentials.
-# Both the user and device private keys are required.
+# The user id and the device private key are required.
 client:
   # userPrivateKey: 5nzta5SD3T2Dky66ZmkDN7rhyFZjHLUvXENosNTA495boCuP8DA8msqu85L7ZhydxiLw1MxGYUhsDydM6gbTpGP5
   userId: AAqCZmUwD5hPAwNZBUsf1xsqsuWMUK74za3r6b9dgioD
