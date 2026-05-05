@@ -73,7 +73,6 @@ public class ActiveProxyClient  {
 	}
 
 	public VertxFuture<Void> start() {
-
 		Future<Void> deployFuture = resolvePeer().compose(v ->
 			vertx.deployVerticle(session).andThen(ar -> {
 				if (ar.failed())
