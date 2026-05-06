@@ -1,7 +1,7 @@
 service:
   peerId: 7oswzEbvf5Frkr5B8PwiCABqkRJXYzTWUvZnb87r63JZ
   host: 192.168.8.80
-  port: 8090
+  port: 9090
 
 client:
   # user id: C5ioCZVtMMjRB9d1Ge78kzEAHs5nZroFxXkuySKEMVPu
