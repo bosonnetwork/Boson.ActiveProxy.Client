@@ -99,7 +99,7 @@ public class ConfigurationTests {
 		Signature.KeyPair deviceKey = Signature.KeyPair.random();
 
 		Configuration config = Configuration.builder()
-				.service(Id.random(), "192.168.8.80", 8090)
+				.service(Id.random(), "192.168.8.80", 9090)
 				.userKey(userKey)
 				.deviceKey(deviceKey)
 				.upstream("127.0.0.1", 8888, "http://")
