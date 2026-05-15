@@ -12,7 +12,6 @@ The Java client library for the **Boson Active Proxy** — a Boson layer-2 servi
 
 - [What Is Active Proxy?](#what-is-active-proxy)
 - [How It Works](#how-it-works)
-- [Key Classes](#key-classes)
 - [Prerequisites](#prerequisites)
 - [Build](#build)
 - [Adding as a Dependency](#adding-as-a-dependency)
