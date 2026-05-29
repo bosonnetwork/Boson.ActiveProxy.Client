@@ -117,7 +117,7 @@ public class Packet {
 			shortToNetwork(version, secret, pos);
 			pos += Short.BYTES;
 
-			System.arraycopy(userId.bytes(), 0, secret, pos, Id.BYTES);
+			System.arraycopy(userId.bytesUnsafe(), 0, secret, pos, Id.BYTES);
 			pos += Id.BYTES;
 
 			System.arraycopy(clientSessionPk.bytes(), 0, secret, pos, CryptoBox.PublicKey.BYTES);
@@ -136,7 +136,7 @@ public class Packet {
 			Buffer packet = Buffer.buffer(size);
 			packet.appendUnsignedShort(size);
 			packet.appendByte(PacketType.AUTH.value());
-			packet.appendBytes(deviceId.bytes());
+			packet.appendBytes(deviceId.bytesUnsafe());
 			packet.appendBytes(cipher);
 
 			return packet;
@@ -335,7 +335,7 @@ public class Packet {
 			Buffer packet = Buffer.buffer(size);
 			packet.appendUnsignedShort(size);
 			packet.appendByte(PacketType.ATTACH.value());
-			packet.appendBytes(deviceId.bytes());
+			packet.appendBytes(deviceId.bytesUnsafe());
 			packet.appendBytes(cipher);
 
 			return packet;

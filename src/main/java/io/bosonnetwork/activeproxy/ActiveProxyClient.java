@@ -30,7 +30,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.bosonnetwork.Node;
-import io.bosonnetwork.vertx.VertxFuture;
+import io.bosonnetwork.vertx.ContextualFuture;
 
 public class ActiveProxyClient  {
 	private final Vertx vertx;
@@ -72,7 +72,7 @@ public class ActiveProxyClient  {
 		}
 	}
 
-	public VertxFuture<Void> start() {
+	public ContextualFuture<Void> start() {
 		Future<Void> deployFuture = resolvePeer().compose(v ->
 			vertx.deployVerticle(session).andThen(ar -> {
 				if (ar.failed())
@@ -80,14 +80,14 @@ public class ActiveProxyClient  {
 			}).mapEmpty()
 		);
 
-		return VertxFuture.of(deployFuture);
+		return ContextualFuture.of(deployFuture);
 	}
 
-	public VertxFuture<Void> stop() {
+	public ContextualFuture<Void> stop() {
 		if (!session.isRunning())
-			return VertxFuture.succeededFuture();
+			return ContextualFuture.succeededFuture();
 
-		return VertxFuture.of(vertx.undeploy(session.deploymentID()).compose(v -> session.close()));
+		return ContextualFuture.of(vertx.undeploy(session.deploymentID()).compose(v -> session.close()));
 	}
 
 	public boolean isRunning() {
