@@ -23,12 +23,14 @@
 package io.bosonnetwork.activeproxy;
 
 import java.net.InetAddress;
+import java.net.URI;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
 import io.vertx.core.Future;
@@ -41,7 +43,6 @@ import org.slf4j.LoggerFactory;
 
 import io.bosonnetwork.CryptoContext;
 import io.bosonnetwork.Id;
-import io.bosonnetwork.Identity;
 import io.bosonnetwork.Node;
 import io.bosonnetwork.PeerInfo;
 import io.bosonnetwork.crypto.CryptoBox;
@@ -49,7 +50,7 @@ import io.bosonnetwork.crypto.CryptoException;
 import io.bosonnetwork.crypto.CryptoIdentity;
 import io.bosonnetwork.vertx.BosonVerticle;
 
-public class ProxySession extends BosonVerticle {
+class ProxySession extends BosonVerticle {
 	private static final int PERIODIC_CHECK_INTERVAL = 15 * 1000;	// 15 seconds
 	private static final int IDLE_CHECK_INTERVAL = 60 * 1000;		// 1 minute
 	private static final int STOP_DELAY = 5 * 1000; 				// 5 seconds
@@ -62,13 +63,13 @@ public class ProxySession extends BosonVerticle {
 	private Configuration config;
 
 	private Id userId;
-	private Identity deviceIdentity;
+	private CryptoIdentity deviceIdentity;
 	private SocketAddress serviceAddress;
 	private SocketAddress upstreamAddress;
 
-	private boolean nameAccessEnabled;
-	private String endpoint;
-	private String namedEndpoint;
+	private volatile boolean nameAccessEnabled;
+	private volatile String endpoint;
+	private volatile String namedEndpoint;
 	private PeerInfo peerInfo;
 
 	// Proxy and upstream with different buffer size, so should not share the same NetClient
@@ -80,13 +81,15 @@ public class ProxySession extends BosonVerticle {
 
 	private final ProxyConnectionHandler connectionHandler;
 
-	private ConnectionStatusListener connectionStatusListener;
+	private final Object listenersLock = new Object();
+	private volatile ConnectionStatusListener connectionStatusListener;
 
-	private boolean connected;
-	private int nextConnectionId;
+	private volatile boolean connected;
+	private long nextConnectionId;
 	private int maxConnections;
 	private int connectFailures;
-	private int inFlights;
+	private int inFlight;
+	private int pendingConnects;	// connections currently being dialed but not yet established
 	private final Map<ProxyConnection, Boolean> connections;
 
 	private long periodicCheckTimer;
@@ -105,7 +108,6 @@ public class ProxySession extends BosonVerticle {
 		this.userId = config.getUserId();
 		this.deviceIdentity = new CryptoIdentity(config.getDeviceKey());
 		this.servicePeerId = config.getServicePeerId();
-		this.serviceAddress = SocketAddress.inetSocketAddress(config.getServicePort(), config.getServiceHost());
 		this.upstreamAddress = SocketAddress.inetSocketAddress(config.getUpstreamPort(), config.getUpstreamHost());
 
 		this.nextConnectionId = 0;
@@ -113,7 +115,8 @@ public class ProxySession extends BosonVerticle {
 		this.connections = new HashMap<>();
 		this.connected = false;
 		this.connectFailures = 0;
-		this.inFlights = 0;
+		this.inFlight = 0;
+		this.pendingConnects = 0;
 
 		this.running = false;
 
@@ -187,24 +190,24 @@ public class ProxySession extends BosonVerticle {
 		return nameAccessEnabled;
 	}
 
-	public void addConnectionStatusListener(ConnectionStatusListener listener) {
-		assert (listener != null) : "Invalid listener";
-		if (this.connectionStatusListener == null) {
-			this.connectionStatusListener = listener;
-		} else {
-			if (this.connectionStatusListener instanceof ListenerArray listeners)
+	public void addConnectionListener(ConnectionStatusListener listener) {
+		Objects.requireNonNull(listener, "listener");
+		synchronized (listenersLock) {
+			if (connectionStatusListener instanceof ListenerArray listeners)
 				listeners.add(listener);
 			else
-				this.connectionStatusListener = new ListenerArray(this.connectionStatusListener, listener);
+				connectionStatusListener = new ListenerArray(listener);
 		}
 	}
 
-	public void removeConnectionStatusListener(ConnectionStatusListener listener) {
-		ConnectionStatusListener current = this.connectionStatusListener;
-		if (current == listener)
-			this.connectionStatusListener = null;
-		else if (current instanceof ListenerArray listeners)
-			listeners.remove(listener);
+	public void removeConnectionListener(ConnectionStatusListener listener) {
+		synchronized (listenersLock) {
+			if (connectionStatusListener instanceof ListenerArray listeners) {
+				listeners.remove(listener);
+				if (listeners.isEmpty())
+					connectionStatusListener = null;
+			}
+		}
 	}
 
 	@Override
@@ -229,7 +232,14 @@ public class ProxySession extends BosonVerticle {
 		periodicCheckTimer = vertx.setPeriodic(PERIODIC_CHECK_INTERVAL, this::periodicCheck);
 
 		running = true;
-		return connect();
+		return connect().andThen(ar -> {
+			if (ar.succeeded()) {
+				log.debug("Proxy session {} started", servicePeerId);
+			} else {
+				running = false;
+				log.error("Proxy session {} failed to start", servicePeerId, ar.cause());
+			}
+		});
 	}
 
 	@Override
@@ -244,7 +254,7 @@ public class ProxySession extends BosonVerticle {
 
 		connections.keySet().forEach(c -> c.close(true));
 		connections.clear();
-		inFlights = 0;
+		inFlight = 0;
 
 		if (connected) {
 			connected = false;
@@ -280,11 +290,11 @@ public class ProxySession extends BosonVerticle {
 			return;
 
 		lastIdleCheckTimestamp = now;
-		log.info("STATUS: session={}, connections={}, inFlights={}, idleTime={}",
-				servicePeerId, connections.size(), inFlights,
+		log.info("STATUS: session={}, connections={}, inFlight={}, idleTime={}",
+				servicePeerId, connections.size(), inFlight,
 				idleTimestamp == 0 ? 0 : Duration.ofMillis(now - idleTimestamp));
 
-		if (inFlights != 0 || idleTimestamp == 0 || connections.size() <= 1 || now - idleTimestamp < MAX_IDLE_TIME)
+		if (inFlight != 0 || idleTimestamp == 0 || connections.size() <= 1 || now - idleTimestamp < MAX_IDLE_TIME)
 			return;
 
 		log.info("Session {} closing the idle connections...", servicePeerId);
@@ -330,20 +340,54 @@ public class ProxySession extends BosonVerticle {
 		if (!running)
 			return false;
 
-		if (connections.size() >= maxConnections)
+		// Count in-flight dials against the ceiling so concurrent busy/close handlers cannot
+		// over-provision past maxConnections while a connect is still pending.
+		if (connections.size() + pendingConnects >= maxConnections)
 			return false;
 
-		if (connections.isEmpty())
-			return true;
+		// A new connection is needed only when there is no idle (or pending) spare ready to serve the
+		// next CONNECT. Idle established = connections.size() - inFlight; pending dials will become
+		// idle once established.
+		int spares = (connections.size() - inFlight) + pendingConnects;
+		return spares == 0;
+	}
 
-		return inFlights == connections.size();
+	private Future<SocketAddress> resolveServicePeer() {
+		if (config.getServiceHost() == null || config.getServicePort() == 0) {
+			log.info("Looking up service peer {} ...", config.getServicePeerId());
+			return Future.fromCompletionStage(node.findPeer(config.getServicePeerId())).compose(peer -> {
+				if (peer == null) {
+					log.error("Service peer not found {}", config.getServicePeerId());
+					return Future.failedFuture("Service peer not found: " + config.getServicePeerId());
+				}
+
+				URI uri = URI.create(peer.getEndpoint());
+				if (!uri.getScheme().equals("tcp") || uri.getPort() <= 0) {
+					log.error("Service peer endpoint {} is invalid", peer.getEndpoint());
+					return Future.failedFuture("Service peer endpoint is invalid: " + peer.getEndpoint());
+				}
+
+				SocketAddress addr = SocketAddress.inetSocketAddress(uri.getPort(), uri.getHost());
+				return Future.succeededFuture(addr);
+			});
+		} else {
+			SocketAddress addr = SocketAddress.inetSocketAddress(config.getServicePort(), config.getServiceHost());
+			return Future.succeededFuture(addr);
+		}
 	}
 
 	private Future<Void> connect() {
-		log.debug("Creating new proxy connection to service {}@{} ...", servicePeerId, serviceAddress);
-		return proxyClient.connect(serviceAddress).andThen(ar -> {
+		// Count this dial as pending until it settles, so needsNewConnection() won't launch a
+		// redundant connect (or exceed maxConnections) while it is in flight.
+		pendingConnects++;
+		return resolveServicePeer().compose(addr -> {
+			this.serviceAddress = addr;
+			log.debug("Creating new proxy connection to service {}@{} ...", servicePeerId, serviceAddress);
+			return proxyClient.connect(serviceAddress);
+		}).andThen(ar -> {
+			pendingConnects--;
 			if (ar.succeeded()) {
-				int connectionId = nextConnectionId++;
+				long connectionId = nextConnectionId++;
 				log.info("Created new proxy connection {} to service {}@{}", connectionId, servicePeerId, serviceAddress);
 				ProxyConnection connection = new ProxyConnection(connectionId, vertxContext, peerContext, sessionContext, ar.result(), connectionHandler);
 				connections.put(connection, Boolean.TRUE);
@@ -357,14 +401,14 @@ public class ProxySession extends BosonVerticle {
 							servicePeerId, serviceAddress, connectFailures, ar.cause().getMessage());
 
 				if (running) {
-					int reconnectDelay = Math.min((1 << connectFailures), 60) * 1000;
+					int reconnectDelay = Math.min(connectFailures * 5, 60) * 1000;
 					vertx.setTimer(reconnectDelay, unused -> {
 						if (needsNewConnection())
 							connect();
 					});
 				}
 			}
-		}).otherwiseEmpty().mapEmpty();
+		}).mapEmpty();
 	}
 
 	private void connectionChallengeHandler(ProxyConnection connection, byte[] challenge) {
@@ -441,12 +485,12 @@ public class ProxySession extends BosonVerticle {
 	}
 
 	private void connectionIdleHandler(@SuppressWarnings("unused") ProxyConnection connection) {
-		if (--inFlights == 0)
+		if (--inFlight == 0)
 			idleTimestamp = System.currentTimeMillis();
 	}
 
 	private void connectionBusyHandler(@SuppressWarnings("unused") ProxyConnection connection) {
-		++inFlights;
+		++inFlight;
 		idleTimestamp = 0;
 		if (needsNewConnection())
 			connect();
@@ -459,7 +503,6 @@ public class ProxySession extends BosonVerticle {
 		serviceAddress = null;
 		upstreamAddress = null;
 		userId = null;
-		deviceIdentity = null;
 		node = null;
 		config = null;
 
@@ -480,29 +523,43 @@ public class ProxySession extends BosonVerticle {
 			clientSessionKeyPair = null;
 		}
 
+		if (deviceIdentity != null) {
+			deviceIdentity.destroy();
+			deviceIdentity = null;
+		}
+
 		log.debug("Proxy session {} closed", servicePeerId);
 		return Future.succeededFuture();
 	}
 
-	private static class ListenerArray extends ArrayList<ConnectionStatusListener> implements ConnectionStatusListener {
+	private static class ListenerArray extends CopyOnWriteArrayList<ConnectionStatusListener> implements ConnectionStatusListener {
 		private static final long serialVersionUID = 3382171779027882437L;
 
-		public ListenerArray(ConnectionStatusListener existing, ConnectionStatusListener newListener) {
+		public ListenerArray(ConnectionStatusListener listener) {
 			super();
-			add(existing);
-			add(newListener);
+			add(listener);
 		}
 
 		@Override
 		public void connected() {
-			for (ConnectionStatusListener listener : this)
-				listener.connected();
+			for (ConnectionStatusListener listener : this) {
+				try {
+					listener.connected();
+				} catch (Throwable t) {
+					log.error("Error dispatching connected to listener: {}", listener, t);
+				}
+			}
 		}
 
 		@Override
 		public void disconnected() {
-			for (ConnectionStatusListener listener : this)
-				listener.disconnected();
+			for (ConnectionStatusListener listener : this) {
+				try {
+					listener.disconnected();
+				} catch (Throwable t) {
+					log.error("Error dispatching disconnected to listener: {}", listener, t);
+				}
+			}
 		}
 	}
 }

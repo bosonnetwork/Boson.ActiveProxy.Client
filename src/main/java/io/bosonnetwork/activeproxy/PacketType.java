@@ -27,7 +27,7 @@ import io.bosonnetwork.crypto.Random;
 
 // This class is copied from the Active-Proxy service implementation.
 // Keep it synchronized with the original source to avoid divergence.
-public enum PacketType {
+enum PacketType {
 	CHALLENGE(0x00, 0x00),	// abstract type, no real value and type header
 	AUTH(0x00, 0x07),
 	AUTH_ACK(AUTH),
@@ -86,17 +86,17 @@ public enum PacketType {
 			case 3 -> ack ? DISCONNECT_ACK : DISCONNECT;
 			case 4, 5, 6 -> {
 				if (ack)
-					throw new IllegalArgumentException("Invalid ACK flag for DATA packet");
+					throw new IllegalArgumentException(String.format("DATA packet must not carry the ACK flag: 0x%02X", flag));
 				else
 					yield DATA;
 			}
 			case 7 -> {
 				if (ack)
-					throw new IllegalArgumentException("Invalid ACK flag for ERROR packet");
+					throw new IllegalArgumentException(String.format("ERROR packet must not carry the ACK flag: 0x%02X", flag));
 				else
 					yield ERROR;
 			}
-			default -> throw new IllegalArgumentException("Should never happen: invalid flag");
+			default -> throw new IllegalArgumentException(String.format("Unrecognized packet type flag: 0x%02X", flag));
 		};
 	}
 }

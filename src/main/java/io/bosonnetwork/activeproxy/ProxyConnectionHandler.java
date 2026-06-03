@@ -30,7 +30,7 @@ import io.vertx.core.net.NetSocket;
 import io.bosonnetwork.CryptoContext;
 import io.bosonnetwork.crypto.CryptoBox;
 
-public interface ProxyConnectionHandler {
+interface ProxyConnectionHandler {
 	void challenge(ProxyConnection connection, byte[] challenge);
 
 	CryptoContext authenticated(ProxyConnection connection, CryptoBox.PublicKey serverSessionPk,

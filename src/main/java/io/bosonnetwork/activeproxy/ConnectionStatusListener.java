@@ -22,7 +22,33 @@
 
 package io.bosonnetwork.activeproxy;
 
+/**
+ * Listener for Active Proxy tunnel connectivity changes.
+ * <p>
+ * Register an implementation with
+ * {@link ActiveProxyClient#addConnectionListener(ConnectionStatusListener)} to be notified when the
+ * encrypted tunnel to the super node becomes available or is lost. A {@link #connected()} event is
+ * always eventually followed by a {@link #disconnected()} event (and the pair may repeat as the
+ * tunnel reconnects).
+ * <p>
+ * <b>Threading:</b> callbacks are invoked on the client's Vert.x event-loop thread. Implementations
+ * must return promptly and must not perform blocking work; any exception thrown by a callback is
+ * caught and logged so that other listeners still run.
+ */
 public interface ConnectionStatusListener {
+	/**
+	 * Invoked after the tunnel has been authenticated and a public endpoint has been allocated.
+	 * <p>
+	 * Once this fires, {@link ActiveProxyClient#getEndpoint()} (and, when name access is enabled,
+	 * {@link ActiveProxyClient#getNamedEndpoint()}) return the assigned endpoint(s).
+	 */
 	void connected();
+
+	/**
+	 * Invoked when the tunnel to the super node is lost.
+	 * <p>
+	 * The client attempts to reconnect automatically; a subsequent {@link #connected()} event is
+	 * delivered if the tunnel is re-established.
+	 */
 	void disconnected();
 }

@@ -26,10 +26,13 @@ import io.bosonnetwork.BosonException;
 
 /**
  * Signals that a packet could not be processed because it is malformed.
- * This exception is typically used to indicate issues with the structure,
- * format, or content of a packet being handled in the application.
- * </p>
- * MalformedPacketException extends {@link BosonException}, allowing it to
+ * <p>
+ * This exception indicates issues with the structure, format, or content of a
+ * packet being decoded or handled by the Active Proxy protocol — for example a
+ * truncated packet, a size-header mismatch, an unknown packet type, or a
+ * payload that fails decryption.
+ * <p>
+ * {@code MalformedPacketException} extends {@link BosonException}, allowing it to
  * be integrated into the Boson library error-handling framework.
  */
 public class MalformedPacketException extends BosonException {

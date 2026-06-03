@@ -41,7 +41,7 @@ import io.bosonnetwork.crypto.Signature;
 // This class is copied from the Active-Proxy service implementation.
 // Keep it synchronized with the original source to avoid divergence.
 @SuppressWarnings("unused")
-public class Packet {
+class Packet {
 	public static final int VERSION = 1;
 	public static final int HEADER_BYTES = Short.BYTES + Byte.BYTES;
 
@@ -52,7 +52,7 @@ public class Packet {
 
 		int size = packet.getUnsignedShort(0);
 		if (size != packet.length())
-			throw new MalformedPacketException("package size mismatch");
+			throw new MalformedPacketException("packet size mismatch");
 
 		try {
 			return PacketType.valueOf(packet.getByte(Short.BYTES));
@@ -79,14 +79,14 @@ public class Packet {
 
 			int size = packet.getUnsignedShort(0);
 			if (size != packet.length())
-				throw new MalformedPacketException("package size mismatch");
+				throw new MalformedPacketException("packet size mismatch");
 
 			byte[] challenge = packet.getBytes(Short.BYTES, packet.length());
 			return new Challenge(challenge);
 		}
 	}
 
-	/*/
+	/*
 	 * AUTH packet payload:
 	 *   - plain
 	 *     - deviceId
@@ -103,7 +103,7 @@ public class Packet {
 					   boolean nameAccess, byte[] deviceSig) {
 		private static final int SECRET_BYTES = Short.BYTES + Id.BYTES + CryptoBox.PublicKey.BYTES +
 				Byte.BYTES + Signature.BYTES;
-		public static int BYTES = HEADER_BYTES +  // package header
+		public static final int BYTES = HEADER_BYTES +  // packet header
 				Id.BYTES +  // plain device id
 				CryptoBox.Nonce.BYTES + CryptoBox.MAC_BYTES + // encryption header
 				SECRET_BYTES;
@@ -163,6 +163,9 @@ public class Packet {
 				throw new MalformedPacketException("failed to decrypt packet", e);
 			}
 
+			if (secret.length < SECRET_BYTES)
+				throw new MalformedPacketException("AUTH payload too short");
+
 			pos = 0;
 			int version = networkToShort(secret, pos);
 			pos += Short.BYTES;
@@ -182,7 +185,7 @@ public class Packet {
 		}
 	}
 
-	/*/
+	/*
 	 * AUTH_ACK packet payload:
 	 * - encrypted
 	 *   - serverSessionPk[server]
@@ -258,6 +261,9 @@ public class Packet {
 				throw new MalformedPacketException("failed to decrypt packet", e);
 			}
 
+			if (secret.length < MIN_SECRET_BYTES)
+				throw new MalformedPacketException("AUTH_ACK payload too short");
+
 			pos = 0;
 			CryptoBox.PublicKey serverSessionPk = CryptoBox.PublicKey.fromBytes(
 					Arrays.copyOfRange(secret, pos, pos + CryptoBox.PublicKey.BYTES));
@@ -283,7 +289,7 @@ public class Packet {
 				throw new MalformedPacketException("missing endpoint");
 
 			String namedEndpoint = null;
-			if (secret[pos] != 0) {
+			if (pos < secret.length && secret[pos] != 0) {
 				int end = pos;
 				while (end < secret.length && secret[end] != 0) end++;
 				if (end >= secret.length)
@@ -299,7 +305,7 @@ public class Packet {
 		}
 	}
 
-	/*/
+	/*
 	 * ATTACH packet payload:
 	 *   - plain
 	 *     - deviceId
@@ -361,6 +367,9 @@ public class Packet {
 			} catch (CryptoException e) {
 				throw new MalformedPacketException("failed to decrypt packet", e);
 			}
+
+			if (secret.length < SECRET_BYTES)
+				throw new MalformedPacketException("ATTACH payload too short");
 
 			pos = 0;
 			CryptoBox.PublicKey clientSessionPk = CryptoBox.PublicKey.fromBytes(
@@ -462,22 +471,27 @@ public class Packet {
 				throw new MalformedPacketException("failed to decrypt packet", e);
 			}
 
+			if (secret.length < SECRET_BYTES)
+				throw new MalformedPacketException("CONNECT payload too short");
+
 			int pos = 0;
 			int port = networkToShort(secret, pos);
 			pos += Short.BYTES;
 			int addrLen = Byte.toUnsignedInt(secret[pos++]);
+			if (addrLen > secret.length - pos)
+				throw new MalformedPacketException("invalid address length");
 			byte[] addr = new byte[addrLen];
 			System.arraycopy(secret, pos, addr, 0, addrLen);
 
 			try {
 				return new Connect(InetAddress.getByAddress(addr), port);
 			} catch (UnknownHostException e) {
-				throw new MalformedPacketException("Invalid address", e);
+				throw new MalformedPacketException("invalid address", e);
 			}
 		}
 	}
 
-	/*/
+	/*
 	 * CONNECT_ACK packet payload:
 	 * - plain
 	 *   - succeeded[boolean]
@@ -543,7 +557,7 @@ public class Packet {
 		}
 	}
 
-	/*/
+	/*
 	 * DATA packet payload:
 	 * - encrypted
 	 *   - data
@@ -628,6 +642,9 @@ public class Packet {
 			} catch (CryptoException e) {
 				throw new MalformedPacketException("failed to decrypt packet", e);
 			}
+
+			if (secret.length < MIN_SECRET_BYTES)
+				throw new MalformedPacketException("ERROR payload too short");
 
 			int pos = 0;
 			short code = (short) networkToShort(secret, pos);

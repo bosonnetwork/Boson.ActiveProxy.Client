@@ -34,12 +34,35 @@ import io.bosonnetwork.Id;
 import io.bosonnetwork.crypto.CryptoBox;
 import io.bosonnetwork.crypto.Random;
 
+/**
+ * A single multiplexing connection between this client and the Active Proxy super node.
+ * <p>
+ * Each {@code ProxyConnection} owns one TCP socket to the super node (the <em>proxy socket</em>) and,
+ * while relaying, one TCP socket to the local upstream service (the <em>upstream socket</em>). The
+ * proxy socket carries a length-prefixed, encrypted packet stream; {@link #proxyHandler(Buffer)}
+ * de-frames it (handling TCP segmentation via {@link #stickyBuffer}) and dispatches each complete
+ * packet through {@link #packetHandler(Buffer)} according to the current {@link State}.
+ * <p>
+ * <b>Lifecycle / handshake:</b> a connection starts in {@link State#Initializing}, receives a
+ * {@code CHALLENGE}, and authenticates (first connection of a session) or attaches (subsequent
+ * connections) to reach {@link State#Idling}. From there the super node drives it through
+ * {@code CONNECT → Relaying → DISCONNECT} cycles to bridge external connections to the upstream;
+ * {@code PING}/{@code PING_ACK} keep the link alive.
+ * <p>
+ * <b>Threading:</b> all methods run on the owning session's Vert.x event loop, so no field is
+ * accessed from another thread and no synchronization is required here.
+ *
+ * @implNote The disconnect path uses a small three-way handshake — see {@link #disconnectUpstream()}.
+ */
 @SuppressWarnings("UnusedReturnValue")
-public class ProxyConnection {
+class ProxyConnection {
 	private static final int KEEP_ALIVE_INTERVAL = 60000;
 	private static final int MAX_KEEP_ALIVE_RETRY = 3;
+	// A relayed connection is fully torn down only after three disconnect confirmations:
+	// the local upstream end, the server DISCONNECT, and the matching DISCONNECT_ACK.
+	private static final int DISCONNECT_CONFIRMS = 3;
 
-	private final int id;
+	private final long id;
 	private Context vertxContext;
 	private CryptoContext peerContext;
 	private CryptoContext sessionContext;
@@ -56,43 +79,63 @@ public class ProxyConnection {
 
 	private static final Logger log = LoggerFactory.getLogger(ProxyConnection.class);
 
+	/**
+	 * Connection state machine. Each state declares, via {@link #accept(PacketType)}, which inbound
+	 * packet types are valid; any other type is treated as a protocol violation and closes the
+	 * connection.
+	 * <p>
+	 * Normal progression:
+	 * <pre>
+	 *   Initializing --CHALLENGE--&gt; Authenticating|Attaching --*_ACK--&gt; Idling
+	 *   Idling       --CONNECT--&gt;   Connecting      --upstream ok--&gt;   Relaying
+	 *   Relaying     --DISCONNECT / upstream end--&gt; Disconnecting --(handshake)--&gt; Idling
+	 * </pre>
+	 * {@link #Closed} is terminal.
+	 */
 	private enum State {
+		/** Freshly opened; awaiting the server {@code CHALLENGE}. */
 		Initializing {
 			@Override
 			public boolean accept(PacketType type) {
 				return type == PacketType.CHALLENGE;
 			}
 		},
+		/** First connection of a session: {@code AUTH} sent, awaiting {@code AUTH_ACK}. */
 		Authenticating {
 			@Override
 			public boolean accept(PacketType type) {
 				return type == PacketType.AUTH_ACK;
 			}
 		},
+		/** Additional connection of an authenticated session: {@code ATTACH} sent, awaiting {@code ATTACH_ACK}. */
 		Attaching {
 			@Override
 			public boolean accept(PacketType type) {
 				return type == PacketType.ATTACH_ACK;
 			}
 		},
+		/** Authenticated and idle; awaiting a {@code CONNECT} request (or keep-alive {@code PING_ACK}). */
 		Idling {
 			@Override
 			public boolean accept(PacketType type) {
 				return type == PacketType.PING_ACK || type == PacketType.CONNECT;
 			}
 		},
+		/** {@code CONNECT} received; dialing the upstream service. */
 		Connecting {
 			@Override
 			public boolean accept(PacketType type) {
 				return type == PacketType.PING_ACK || type == PacketType.DISCONNECT;
 			}
 		},
+		/** Upstream connected; relaying {@code DATA} in both directions. */
 		Relaying {
 			@Override
 			public boolean accept(PacketType type) {
 				return type == PacketType.DATA || type == PacketType.DISCONNECT || type == PacketType.PING_ACK;
 			}
 		},
+		/** Tearing down the relayed connection via the disconnect handshake before returning to {@link #Idling}. */
 		Disconnecting {
 			@Override
 			public boolean accept(PacketType type) {
@@ -100,6 +143,7 @@ public class ProxyConnection {
 						type == PacketType.DATA || type == PacketType.PING_ACK;
 			}
 		},
+		/** Terminal: the connection (and its sockets) have been closed. */
 		Closed {
 			@Override
 			public boolean accept(PacketType type) {
@@ -107,10 +151,14 @@ public class ProxyConnection {
 			}
 		};
 
+		/**
+		 * @param type an inbound packet type
+		 * @return {@code true} if this state may process {@code type}
+		 */
 		public abstract boolean accept(PacketType type);
 	}
 
-	protected ProxyConnection(int id, Context vertxContext, CryptoContext peerContext, CryptoContext sessionContext,
+	protected ProxyConnection(long id, Context vertxContext, CryptoContext peerContext, CryptoContext sessionContext,
 							  NetSocket proxySocket, ProxyConnectionHandler handler) {
 		this.id = id;
 		this.vertxContext = vertxContext;
@@ -133,7 +181,7 @@ public class ProxyConnection {
 	}
 
 	@SuppressWarnings("unused")
-	public int getId() {
+	public long getId() {
 		return id;
 	}
 
@@ -223,6 +271,14 @@ public class ProxyConnection {
 			}
 
 			int packetSize = stickyBuffer.getUnsignedShort(0);
+			if (packetSize < Packet.HEADER_BYTES) {
+				// noinspection LoggingSimilarMessage
+				log.error("Connection {} got malformed packet (declared size {}) from proxy socket {}",
+						id, packetSize, proxySocket.remoteAddress());
+				close();
+				return;
+			}
+
 			int rs = packetSize - stickyBuffer.length();
 			if (remaining < rs) {
 				stickyBuffer.appendBuffer(buffer, pos, remaining);
@@ -235,6 +291,9 @@ public class ProxyConnection {
 
 			packetHandler(stickyBuffer);
 			stickyBuffer = null;
+
+			if (state == State.Closed)
+				return;
 		}
 
 		while (remaining > 0) {
@@ -245,6 +304,14 @@ public class ProxyConnection {
 			}
 
 			int packetSize = buffer.getUnsignedShort(pos);
+			if (packetSize < Packet.HEADER_BYTES) {
+				// noinspection LoggingSimilarMessage
+				log.error("Connection {} got malformed packet (declared size {}) from proxy socket {}",
+						id, packetSize, proxySocket.remoteAddress());
+				close();
+				return;
+			}
+
 			if (remaining < packetSize) {
 				stickyBuffer = Buffer.buffer(packetSize);
 				stickyBuffer.appendBuffer(buffer, pos, remaining);
@@ -254,6 +321,9 @@ public class ProxyConnection {
 			packetHandler(buffer.slice(pos, pos + packetSize));
 			pos += packetSize;
 			remaining -= packetSize;
+
+			if (state == State.Closed)
+				return;
 		}
 	}
 
@@ -282,14 +352,14 @@ public class ProxyConnection {
 				id, type, packet.length(), proxySocket.remoteAddress());
 
 		if (!state.accept(type)) {
-			log.error("Connection {} can not accept {} packet in {} state", id, type, state);
+			log.error("Connection {} cannot accept {} packet in {} state", id, type, state);
 			close();
 			return;
 		}
 
 		try {
 			switch (type) {
-				case CHALLENGE -> HandleChallenge(Packet.Challenge.decode(packet));
+				case CHALLENGE -> handleChallenge(Packet.Challenge.decode(packet));
 				case AUTH_ACK -> handleAuthAck(Packet.AuthAck.decode(packet, peerContext));
 				case ATTACH_ACK -> handleAttachAck(Packet.AttachAck.decode(packet));
 				case PING_ACK -> handlePingAck(Packet.PingAck.decode(packet));
@@ -309,7 +379,7 @@ public class ProxyConnection {
 		}
 	}
 
-	private void HandleChallenge(Packet.Challenge packet) {
+	private void handleChallenge(Packet.Challenge packet) {
 		handler.challenge(this, packet.challenge());
 	}
 
@@ -335,11 +405,13 @@ public class ProxyConnection {
 		}
 
 		state = State.Connecting;
+		// Reset the disconnect handshake count at the start of a new relay cycle. Doing this here
+		// (rather than in the async callback below) ensures a DISCONNECT that races the upstream
+		// connect keeps its confirmation instead of having it wiped by a late callback.
+		disconnectConfirms = 0;
 		vertxContext.runOnContext(v -> handler.busy(this));
 		log.debug("Connection {} connecting to the upstream...", id);
 		handler.connectUpstream().andThen(ar -> {
-			disconnectConfirms = 0;
-
 			if (ar.succeeded()) {
 				NetSocket socket = ar.result();
 				log.debug("Connection {} connected to the upstream: {}", id, socket.remoteAddress());
@@ -355,7 +427,7 @@ public class ProxyConnection {
 
 	private void handleData(Packet.Data packet) {
 		if (state != State.Relaying) {
-			log.trace("Connection {} got DATA packet from proxy socket not in relaying state, ignore.", id);
+			log.trace("Connection {} dropping DATA packet from proxy socket because the connection is not in the relaying state", id);
 			return;
 		}
 
@@ -386,7 +458,7 @@ public class ProxyConnection {
 		//   - send disconnect
 		// - change the state to disconnecting
 		if (state == State.Connecting && upstreamSocket == null) {
-			disconnectConfirms++;
+			confirmDisconnect();
 			sendDisconnect();
 		}
 
@@ -415,16 +487,16 @@ public class ProxyConnection {
 
 	private void upstreamSocketExceptionHandler(Throwable t) {
 		if (log.isDebugEnabled())
-			log.error("Client socket error", t);
+			log.error("Connection {} upstream socket error", id, t);
 		else
-			log.error("Client socket error: {}", t.getMessage());
+			log.error("Connection {} upstream socket error: {}", id, t.getMessage());
 
 		upstreamSocket.close();
 	}
 
 	private void upstreamDataHandler(Buffer data) {
 		if (state != State.Relaying) {
-			log.trace("Connection {} dropping data from upstream due the connection not in relaying state.", id);
+			log.trace("Connection {} dropping data from upstream because the connection is not in the relaying state", id);
 			return;
 		}
 
@@ -448,11 +520,31 @@ public class ProxyConnection {
 		}
 	}
 
+	/**
+	 * Closes the upstream socket (if still open) and records one step of the disconnect handshake via
+	 * {@link #confirmDisconnect()}.
+	 */
 	private void disconnectUpstream() {
 		if (upstreamSocket != null)
 			upstreamSocket.close();
 
-		if (++disconnectConfirms == 3) {
+		confirmDisconnect();
+	}
+
+	/**
+	 * Records one disconnect confirmation and, once {@link #DISCONNECT_CONFIRMS} have been observed,
+	 * returns the connection to {@link State#Idling} so it can be reused for the next {@code CONNECT}.
+	 *
+	 * @implNote A relayed connection is fully torn down only after three confirmations are observed:
+	 *           the local upstream end, the {@code DISCONNECT} from the super node, and the matching
+	 *           {@code DISCONNECT_ACK}. Every contributing path funnels through this single method;
+	 *           reaching {@link #DISCONNECT_CONFIRMS} transitions back to {@link State#Idling}. The
+	 *           counter is reset to {@code 0} when a new {@code CONNECT} cycle starts (see
+	 *           {@link #handleConnect}), so an aborted connect cannot leak a stale count into the next
+	 *           cycle.
+	 */
+	private void confirmDisconnect() {
+		if (++disconnectConfirms == DISCONNECT_CONFIRMS) {
 			log.trace("Connection {} disconnect confirmed, change state to idle.", id);
 			state = State.Idling;
 			disconnectConfirms = 0;
@@ -484,7 +576,12 @@ public class ProxyConnection {
 			upstreamSocket.handler(null);
 			upstreamSocket.endHandler(null);
 			upstreamSocket.exceptionHandler(null);
-			upstreamSocket.close();
+			upstreamSocket.close().onComplete(ar -> {
+				if (ar.succeeded())
+					log.debug("Connection {} upstream socket closed", id);
+				else
+					log.error("Connection {} upstream socket close failed", id, ar.cause());
+			});
 			upstreamSocket = null;
 		}
 
@@ -492,19 +589,31 @@ public class ProxyConnection {
 			proxySocket.handler(null);
 			proxySocket.endHandler(null);
 			proxySocket.exceptionHandler(null);
-			proxySocket.close();
+			proxySocket.close().onComplete(ar -> {
+				if (ar.succeeded())
+					log.debug("Connection {} proxy socket closed", id);
+				else
+					log.error("Connection {} proxy socket close failed", id, ar.cause());
+			});
 			proxySocket = null;
 		}
 
 		log.debug("Connection {} closed", id);
-		if (!silent)
-			vertxContext.runOnContext(v -> handler.close(this));
+
+		// Capture references before clearing the fields: runOnContext defers to the next tick, so a
+		// lambda reading the `handler`/`vertxContext` fields would see null (and NPE) after this
+		// method returns. Snapshot them so the close notification is delivered reliably.
+		ProxyConnectionHandler h = handler;
+		Context ctx = vertxContext;
 
 		vertxContext = null;
 		peerContext = null;
 		sessionContext = null;
 		handler = null;
 		stickyBuffer = null;
+
+		if (!silent)
+			ctx.runOnContext(v -> h.close(this));
 
 		return Future.succeededFuture();
 	}

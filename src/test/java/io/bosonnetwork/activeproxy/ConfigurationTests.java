@@ -39,7 +39,7 @@ public class ConfigurationTests {
 	@Test
 	void testBuildConfig() {
 		Configuration config = Configuration.builder()
-				.servicePeerId(Id.random())
+				.service(Id.random())
 				.serviceHost("10.0.0.1")
 				.servicePort(10090)
 				.userId(Id.random())
@@ -53,7 +53,7 @@ public class ConfigurationTests {
 		assertNotNull(config);
 
 		config = Configuration.builder()
-				.servicePeerId(Id.random())
+				.service(Id.random())
 				.userKey(Base58.encode(Signature.KeyPair.random().privateKey().bytes()))
 				.deviceKey("0x" + Hex.encode(Signature.KeyPair.random().privateKey().bytes()))
 				.upstreamHost("192.168.1.8")
@@ -75,7 +75,7 @@ public class ConfigurationTests {
 
 		assertThrows(IllegalStateException.class, () ->
 				Configuration.builder()
-						.servicePeerId(Id.random())
+						.service(Id.random())
 						.deviceKey(Signature.KeyPair.random())
 						.upstreamHost("192.168.1.8")
 						.upstreamPort(8888)
@@ -84,7 +84,7 @@ public class ConfigurationTests {
 
 		assertThrows(IllegalStateException.class, () ->
 				Configuration.builder()
-						.servicePeerId(Id.random())
+						.service(Id.random())
 						.userKey(Signature.KeyPair.random())
 						.deviceKey(Signature.KeyPair.random())
 						.upstreamPort(8888)
