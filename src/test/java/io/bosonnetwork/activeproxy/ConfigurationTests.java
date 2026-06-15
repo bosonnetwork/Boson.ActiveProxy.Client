@@ -94,6 +94,23 @@ public class ConfigurationTests {
 	}
 
 	@Test
+	void testUpstreamPortValidation() {
+		// The setter rejects out-of-range ports immediately.
+		assertThrows(IllegalArgumentException.class, () -> Configuration.builder().upstreamPort(0));
+		assertThrows(IllegalArgumentException.class, () -> Configuration.builder().upstreamPort(-1));
+		assertThrows(IllegalArgumentException.class, () -> Configuration.builder().upstreamPort(70000));
+
+		// build() rejects a configuration whose upstream port was never set (defaults to 0).
+		assertThrows(IllegalStateException.class, () ->
+				Configuration.builder()
+						.service(Id.random())
+						.userKey(Signature.KeyPair.random())
+						.deviceKey(Signature.KeyPair.random())
+						.upstreamHost("192.168.1.8")
+						.build());
+	}
+
+	@Test
 	void saveAndLoad() throws Exception {
 		Signature.KeyPair userKey = Signature.KeyPair.random();
 		Signature.KeyPair deviceKey = Signature.KeyPair.random();

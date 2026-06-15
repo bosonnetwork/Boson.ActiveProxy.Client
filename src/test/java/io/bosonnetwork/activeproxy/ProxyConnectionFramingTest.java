@@ -14,6 +14,9 @@ import io.vertx.core.buffer.Buffer;
 import io.vertx.core.net.NetClient;
 import io.vertx.core.net.NetServer;
 import io.vertx.core.net.NetSocket;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,10 +36,11 @@ import io.bosonnetwork.crypto.CryptoBox;
 class ProxyConnectionFramingTest {
 
 	/** A {@link ProxyConnectionHandler} with no-op defaults; tests override what they need. */
+	@NullMarked
 	private abstract static class TestHandler implements ProxyConnectionHandler {
 		@Override public void challenge(ProxyConnection c, byte[] challenge) { }
 		@Override public CryptoContext authenticated(ProxyConnection c, CryptoBox.PublicKey serverSessionPk,
-				int maxConnections, boolean nameAccess, String endpoint, String namedEndpoint) { return null; }
+				int maxConnections, boolean nameAccess, String endpoint, @Nullable String namedEndpoint) { return null; }
 		@Override public void open(ProxyConnection c) { }
 		@Override public void close(ProxyConnection c) { }
 		@Override public void idle(ProxyConnection c) { }
@@ -82,7 +86,7 @@ class ProxyConnectionFramingTest {
 				},
 				new TestHandler() {
 					@Override
-					public void challenge(ProxyConnection c, byte[] ch) {
+					public void challenge(@NonNull ProxyConnection c, byte @NonNull [] ch) {
 						ctx.verify(() -> assertArrayEquals(challenge, ch)).completeNow();
 					}
 				});
@@ -100,7 +104,7 @@ class ProxyConnectionFramingTest {
 				serverSock -> serverSock.write(two),
 				new TestHandler() {
 					@Override
-					public void challenge(ProxyConnection c, byte[] ch) {
+					public void challenge(@NonNull ProxyConnection c, byte @NonNull [] ch) {
 						if (count.incrementAndGet() == 2)
 							ctx.completeNow();
 					}
@@ -116,12 +120,12 @@ class ProxyConnectionFramingTest {
 				serverSock -> serverSock.write(Buffer.buffer(new byte[] { 0, 0, 0 })),
 				new TestHandler() {
 					@Override
-					public void challenge(ProxyConnection c, byte[] ch) {
+					public void challenge(@Nullable ProxyConnection c, byte @Nullable [] ch) {
 						challenges.incrementAndGet();
 					}
 
 					@Override
-					public void close(ProxyConnection c) {
+					public void close(@Nullable ProxyConnection c) {
 						ctx.verify(() -> assertEquals(0, challenges.get())).completeNow();
 					}
 				});

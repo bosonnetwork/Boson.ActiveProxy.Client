@@ -18,7 +18,7 @@ import io.bosonnetwork.Id;
 import io.bosonnetwork.crypto.CryptoBox;
 
 /**
- * Unit tests for {@link Packet} framing/codec — header parsing, encode/decode round-trips, and the
+ * Unit tests for {@link Packet} framing/codec - header parsing, encode/decode round-trips, and the
  * malformed-input hardening (truncated/corrupted packets must surface {@link MalformedPacketException}
  * rather than an unchecked exception).
  */

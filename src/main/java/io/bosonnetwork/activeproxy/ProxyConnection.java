@@ -22,10 +22,13 @@
 
 package io.bosonnetwork.activeproxy;
 
+import java.util.Objects;
+
 import io.vertx.core.Context;
 import io.vertx.core.Future;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.net.NetSocket;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,7 +55,7 @@ import io.bosonnetwork.crypto.Random;
  * <b>Threading:</b> all methods run on the owning session's Vert.x event loop, so no field is
  * accessed from another thread and no synchronization is required here.
  *
- * @implNote The disconnect path uses a small three-way handshake — see {@link #disconnectUpstream()}.
+ * @implNote The disconnect path uses a small three-way handshake - see {@link #disconnectUpstream()}.
  */
 @SuppressWarnings("UnusedReturnValue")
 class ProxyConnection {
@@ -63,35 +66,51 @@ class ProxyConnection {
 	private static final int DISCONNECT_CONFIRMS = 3;
 
 	private final long id;
-	private Context vertxContext;
-	private CryptoContext peerContext;
-	private CryptoContext sessionContext;
-	private ProxyConnectionHandler handler;
+	private final Context vertxContext;
+	private final CryptoContext peerContext;
+	private @Nullable CryptoContext sessionContext;
+	private final ProxyConnectionHandler handler;
 
-	private NetSocket proxySocket;
-	private NetSocket upstreamSocket;
+	private final NetSocket proxySocket;
+	private @Nullable NetSocket upstreamSocket;
 
-	private State state;
-	private Buffer stickyBuffer;
+	private State state = State.Initializing;
+	private @Nullable Buffer stickyBuffer;
 
 	private long lastReceiveTimestamp;
 	private int disconnectConfirms;
 
 	private static final Logger log = LoggerFactory.getLogger(ProxyConnection.class);
 
+	// @formatter:off
 	/**
-	 * Connection state machine. Each state declares, via {@link #accept(PacketType)}, which inbound
-	 * packet types are valid; any other type is treated as a protocol violation and closes the
-	 * connection.
+	 * Represents the lifecycle of a proxy connection.
 	 * <p>
-	 * Normal progression:
+	 * The state machine enforces protocol correctness by declaring which {@link PacketType}s
+	 * are valid in each state via {@link #accept(PacketType)}. Reception of an unexpected packet
+	 * is treated as a protocol violation and results in immediate connection closure.
+	 * <p>
+	 * <b>Lifecycle Flow:</b>
+	 * <ol>
+	 *   <li><b>Establishment:</b> {@code Initializing} &rarr; {@code Authenticating} | {@code Attaching} &rarr; {@code Idling}</li>
+	 *   <li><b>Operation:</b> {@code Idling} &rarr; {@code Connecting} &rarr; {@code Relaying}</li>
+	 *   <li><b>Teardown:</b> {@code Relaying} &rarr; {@code Disconnecting} &rarr; {@code Idling}</li>
+	 * </ol>
 	 * <pre>
-	 *   Initializing --CHALLENGE--&gt; Authenticating|Attaching --*_ACK--&gt; Idling
-	 *   Idling       --CONNECT--&gt;   Connecting      --upstream ok--&gt;   Relaying
-	 *   Relaying     --DISCONNECT / upstream end--&gt; Disconnecting --(handshake)--&gt; Idling
+	 *  [ Initializing ] --(CHALLENGE)--> [ Authenticating / Attaching ]
+	 *                                                |
+	 *                                           (AUTH_ACK / ATTACH_ACK)
+	 *                                                v
+	 *  [ Relaying ] <---(upstream ok)--- [ Connecting ] <---(CONNECT)--- [ Idling ]
+	 *       |                                                               ^
+	 *  (DISCONNECT / upstream end)                                          |
+	 *       |                                                               |
+	 *       v                                                               |
+	 *  [ Disconnecting ] ------------------(3-way handshake)----------------/
 	 * </pre>
-	 * {@link #Closed} is terminal.
+	 * {@link #Closed} is the terminal state for the underlying socket.
 	 */
+	// @formatter:on
 	private enum State {
 		/** Freshly opened; awaiting the server {@code CHALLENGE}. */
 		Initializing {
@@ -158,14 +177,13 @@ class ProxyConnection {
 		public abstract boolean accept(PacketType type);
 	}
 
-	protected ProxyConnection(long id, Context vertxContext, CryptoContext peerContext, CryptoContext sessionContext,
+	protected ProxyConnection(long id, Context vertxContext, CryptoContext peerContext, @Nullable CryptoContext sessionContext,
 							  NetSocket proxySocket, ProxyConnectionHandler handler) {
 		this.id = id;
 		this.vertxContext = vertxContext;
 		this.peerContext = peerContext;
 		this.sessionContext = sessionContext;
 		this.handler = handler;
-		this.state = State.Initializing;
 
 		this.lastReceiveTimestamp = System.currentTimeMillis();
 		this.proxySocket = proxySocket;
@@ -230,13 +248,16 @@ class ProxyConnection {
 	}
 
 	private Future<Void> sendData(byte[] data) {
+		CryptoContext sessionContext = requireInitialized(this.sessionContext, "sessionContext");
 		Packet.Data dat = new Packet.Data(data);
 		Future<Void> future = sendPacket(PacketType.DATA, dat.encode(sessionContext));
 
 		// Flow control for the upstream to the proxy
 		if (proxySocket.writeQueueFull()) {
 			log.trace("Proxy socket write queue full, pause upstream reading");
-			upstreamSocket.pause();
+			if (upstreamSocket != null)
+				upstreamSocket.pause();
+
 			proxySocket.drainHandler(v -> {
 				if (upstreamSocket != null) {
 					log.trace("Proxy socket write queue drain, resume upstream reading");
@@ -363,8 +384,8 @@ class ProxyConnection {
 				case AUTH_ACK -> handleAuthAck(Packet.AuthAck.decode(packet, peerContext));
 				case ATTACH_ACK -> handleAttachAck(Packet.AttachAck.decode(packet));
 				case PING_ACK -> handlePingAck(Packet.PingAck.decode(packet));
-				case CONNECT -> handleConnect(Packet.Connect.decode(packet, sessionContext));
-				case DATA -> handleData(Packet.Data.decode(packet, sessionContext));
+				case CONNECT -> handleConnect(Packet.Connect.decode(packet, requireInitialized(sessionContext, "sessionContext")));
+				case DATA -> handleData(Packet.Data.decode(packet, requireInitialized(sessionContext, "sessionContext")));
 				case DISCONNECT -> handleDisconnect(Packet.Disconnect.decode(packet));
 				case DISCONNECT_ACK -> handleDisconnectAck(Packet.DisconnectAck.decode(packet));
 				default -> log.error("INTERNAL ERROR: Connection {} got wrong {} packet in {} state", id, type, state);
@@ -407,7 +428,7 @@ class ProxyConnection {
 		state = State.Connecting;
 		// Reset the disconnect handshake count at the start of a new relay cycle. Doing this here
 		// (rather than in the async callback below) ensures a DISCONNECT that races the upstream
-		// connect keeps its confirmation instead of having it wiped by a late callback.
+		// CONNECT keeps its confirmation instead of having it wiped by a late callback.
 		disconnectConfirms = 0;
 		vertxContext.runOnContext(v -> handler.busy(this));
 		log.debug("Connection {} connecting to the upstream...", id);
@@ -431,6 +452,7 @@ class ProxyConnection {
 			return;
 		}
 
+		final NetSocket upstreamSocket = requireInitialized(this.upstreamSocket, "upstreamSocket");
 		upstreamSocket.write(Buffer.buffer(packet.data())).andThen(ar -> {
 			if (ar.succeeded()) {
 				log.trace("Connection {} sent {} bytes data to upstream", id, packet.data().length);
@@ -444,10 +466,7 @@ class ProxyConnection {
 		if (upstreamSocket.writeQueueFull()) {
 			log.trace("Upstream write queue full, pause proxy reading");
 			proxySocket.pause();
-			upstreamSocket.drainHandler(v-> {
-				if (proxySocket != null)
-					proxySocket.resume();
-			});
+			upstreamSocket.drainHandler(v-> proxySocket.resume());
 		}
 	}
 
@@ -479,8 +498,6 @@ class ProxyConnection {
 			proxySocket.drainHandler(null);
 			proxySocket.resume();
 
-			upstreamSocket.close(); // safe; idempotent
-			upstreamSocket = null;
 			disconnectUpstream();
 		});
 	}
@@ -491,7 +508,10 @@ class ProxyConnection {
 		else
 			log.error("Connection {} upstream socket error: {}", id, t.getMessage());
 
-		upstreamSocket.close();
+		if (upstreamSocket != null) {
+			upstreamSocket.close();
+			upstreamSocket = null;
+		}
 	}
 
 	private void upstreamDataHandler(Buffer data) {
@@ -525,8 +545,10 @@ class ProxyConnection {
 	 * {@link #confirmDisconnect()}.
 	 */
 	private void disconnectUpstream() {
-		if (upstreamSocket != null)
+		if (upstreamSocket != null) {
 			upstreamSocket.close();
+			upstreamSocket = null;
+		}
 
 		confirmDisconnect();
 	}
@@ -540,12 +562,12 @@ class ProxyConnection {
 	 *           {@code DISCONNECT_ACK}. Every contributing path funnels through this single method;
 	 *           reaching {@link #DISCONNECT_CONFIRMS} transitions back to {@link State#Idling}. The
 	 *           counter is reset to {@code 0} when a new {@code CONNECT} cycle starts (see
-	 *           {@link #handleConnect}), so an aborted connect cannot leak a stale count into the next
+	 *           {@link #handleConnect}), so an aborted CONNECT cannot leak a stale count into the next
 	 *           cycle.
 	 */
 	private void confirmDisconnect() {
 		if (++disconnectConfirms == DISCONNECT_CONFIRMS) {
-			log.trace("Connection {} disconnect confirmed, change state to idle.", id);
+			log.trace("Connection {} disconnect confirmed, changing state to idle", id);
 			state = State.Idling;
 			disconnectConfirms = 0;
 			vertxContext.runOnContext(v -> handler.idle(this));
@@ -585,40 +607,31 @@ class ProxyConnection {
 			upstreamSocket = null;
 		}
 
-		if (proxySocket != null) {
-			proxySocket.handler(null);
-			proxySocket.endHandler(null);
-			proxySocket.exceptionHandler(null);
-			proxySocket.close().onComplete(ar -> {
-				if (ar.succeeded())
-					log.debug("Connection {} proxy socket closed", id);
-				else
-					log.error("Connection {} proxy socket close failed", id, ar.cause());
-			});
-			proxySocket = null;
-		}
+		proxySocket.handler(null);
+		proxySocket.endHandler(null);
+		proxySocket.exceptionHandler(null);
+		proxySocket.close().onComplete(ar -> {
+			if (ar.succeeded())
+				log.debug("Connection {} proxy socket closed", id);
+			else
+				log.error("Connection {} proxy socket close failed", id, ar.cause());
+		});
 
 		log.debug("Connection {} closed", id);
 
-		// Capture references before clearing the fields: runOnContext defers to the next tick, so a
-		// lambda reading the `handler`/`vertxContext` fields would see null (and NPE) after this
-		// method returns. Snapshot them so the close notification is delivered reliably.
-		ProxyConnectionHandler h = handler;
-		Context ctx = vertxContext;
-
-		vertxContext = null;
-		peerContext = null;
-		sessionContext = null;
-		handler = null;
 		stickyBuffer = null;
 
 		if (!silent)
-			ctx.runOnContext(v -> h.close(this));
+			vertxContext.runOnContext(v -> handler.close(this));
 
 		return Future.succeededFuture();
 	}
 
 	public Future<Void> close() {
 		return close(false);
+	}
+
+	private static <T> T requireInitialized(@Nullable T obj, String name) {
+		return Objects.requireNonNull(obj, "INTERNAL ERROR: inconsistent state - " + name + " not initialized");
 	}
 }

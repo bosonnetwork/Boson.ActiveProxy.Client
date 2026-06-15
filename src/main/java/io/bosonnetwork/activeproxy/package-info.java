@@ -21,7 +21,7 @@
  */
 
 /**
- * Client library for the <b>Boson Active Proxy</b> — a Boson layer-2 service that lets a device
+ * Client library for the <b>Boson Active Proxy</b> - a Boson layer-2 service that lets a device
  * expose a local TCP service to the public internet even when it sits behind NAT, a firewall, or
  * has no public IP address.
  *
@@ -35,12 +35,12 @@
  * <h2>Public API</h2>
  * Only three types form the supported public surface of this package:
  * <ul>
- *   <li>{@link io.bosonnetwork.activeproxy.ActiveProxyClient} — the entry point that starts and
+ *   <li>{@link io.bosonnetwork.activeproxy.ActiveProxyClient} - the entry point that starts and
  *       stops the tunnel and reports its status;</li>
- *   <li>{@link io.bosonnetwork.activeproxy.Configuration} — immutable client configuration, built
+ *   <li>{@link io.bosonnetwork.activeproxy.Configuration} - immutable client configuration, built
  *       from a YAML map via {@link io.bosonnetwork.activeproxy.Configuration#fromMap(java.util.Map)}
  *       or programmatically through {@link io.bosonnetwork.activeproxy.Configuration#builder()};</li>
- *   <li>{@link io.bosonnetwork.activeproxy.ConnectionStatusListener} — a callback for tunnel
+ *   <li>{@link io.bosonnetwork.activeproxy.ConnectionStatusListener} - a callback for tunnel
  *       connect/disconnect events.</li>
  * </ul>
  * All other types in this package are internal implementation details and may change without notice.
@@ -63,11 +63,14 @@
  * }</pre>
  *
  * <h2>Threading model</h2>
- * The client runs on a Vert.x event loop. All internal state is confined to that event loop; the
+ * The client runs on a Vert.x event loop. All internal states are confined to that event loop; the
  * public accessors and listener-management methods on {@link io.bosonnetwork.activeproxy.ActiveProxyClient}
  * are safe to call from any thread. {@link io.bosonnetwork.activeproxy.ConnectionStatusListener}
  * callbacks are always dispatched on the client's event-loop thread, so they must not block.
  *
  * @see <a href="https://github.com/bosonnetwork">Boson Network</a>
  */
+@NullMarked
 package io.bosonnetwork.activeproxy;
+
+import org.jspecify.annotations.NullMarked;

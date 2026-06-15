@@ -24,10 +24,12 @@ package io.bosonnetwork.activeproxy;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,15 +57,16 @@ import io.bosonnetwork.vertx.ContextualFuture;
  * @see Configuration
  * @see ConnectionStatusListener
  */
-public class ActiveProxyClient  {
-	private Vertx vertx;
-	private final boolean internalVertx;
+public class ActiveProxyClient {
+	private final Vertx vertx;
 
-	private final Node node;
+	private final @Nullable Node node;
 	private final Configuration config;
 
-	private ProxySession session;
 	private final AtomicBoolean started;
+	private volatile @Nullable ProxySession session;
+
+	private final ListenerArray connectionStatusListener;
 
 	private static final Logger log = LoggerFactory.getLogger(ActiveProxyClient.class);
 
@@ -83,20 +86,21 @@ public class ActiveProxyClient  {
 	 * @param config the client configuration
 	 * @throws NullPointerException     if {@code node} is required (no fixed service host/port) but
 	 *                                  {@code null}
-	 * @throws IllegalArgumentException if the configuration is invalid (for example a key that cannot
+	 * @throws IllegalArgumentException if the configuration is invalid (for example, a key that cannot
 	 *                                  establish a crypto context with the service peer)
 	 */
-	public ActiveProxyClient(Vertx vertx, Node node, Configuration config) {
+	public ActiveProxyClient(@Nullable Vertx vertx, @Nullable Node node, Configuration config) {
 		if (config.getServiceHost() == null || config.getServicePort() == 0)
-			Objects.requireNonNull(node, "node");
+			Objects.requireNonNull(node, "node is required if service host/port is not configured");
 
-		this.vertx = vertx != null ? vertx : node.unwrap(Vertx.class);
-		this.internalVertx = this.vertx == null;
+		Vertx v = vertx != null ? vertx : (node != null ? node.unwrap(Vertx.class) : null);
+		this.vertx = Objects.requireNonNull(v, "No Vertx instance available: provide a Vertx, or a Node that exposes one");
 
 		this.node = node;
 		this.config = config;
 
 		this.started = new AtomicBoolean(false);
+		this.connectionStatusListener = new ListenerArray();
 	}
 
 	/**
@@ -104,7 +108,7 @@ public class ActiveProxyClient  {
 	 * <p>
 	 * This resolves the service peer (via DHT when no fixed host/port is configured), deploys the
 	 * internal session, and begins the authentication handshake. The returned future completes once
-	 * the session has been deployed; the tunnel may continue to (re)connect afterwards, with status
+	 * the session has been deployed; the tunnel may continue to (re)connect afterward, with status
 	 * reported through registered {@link ConnectionStatusListener}s.
 	 * <p>
 	 * Calling {@code start()} on an already-started client is a no-op and returns a succeeded future.
@@ -115,19 +119,14 @@ public class ActiveProxyClient  {
 		if (!started.compareAndSet(false, true))
 			return ContextualFuture.succeededFuture();
 
-		if (internalVertx)
-			this.vertx = Vertx.vertx();
+		ProxySession s = new ProxySession(node, config);
+		s.setConnectionListener(connectionStatusListener);
 
-		this.session = new ProxySession(node, config);
-
-		Future<Void> deployFuture = vertx.deployVerticle(session).andThen(ar -> {
-			if (ar.failed()) {
-				session.close();
-				if (internalVertx) {
-					vertx.close();
-					vertx = null;
-				}
-
+		Future<Void> deployFuture = vertx.deployVerticle(s).andThen(ar -> {
+			if (ar.succeeded()) {
+				this.session = s;
+			} else {
+				s.close();
 				started.set(false);
 			}
 		}).mapEmpty();
@@ -139,8 +138,7 @@ public class ActiveProxyClient  {
 	 * Stops the client and tears down the tunnel.
 	 * <p>
 	 * Undeploys the internal session, closes all connections, and releases cryptographic resources.
-	 * If this client created its own internal {@link Vertx} instance, that instance is closed as
-	 * well. Calling {@code stop()} on a client that is not started is a no-op and returns a succeeded
+	 * Calling {@code stop()} on a client that is not started is a no-op and returns a succeeded
 	 * future.
 	 *
 	 * @return a future that completes when the client has fully stopped
@@ -149,12 +147,15 @@ public class ActiveProxyClient  {
 		if (!started.compareAndSet(true, false))
 			return ContextualFuture.succeededFuture();
 
-		Future<Void> future = vertx.undeploy(session.deploymentID())
-				.compose(v -> session.close());
+		ProxySession s = session;
+		if (s == null)
+			return ContextualFuture.failedFuture(new IllegalStateException("Client is not running"));
 
-		if (internalVertx)
-			future = future.compose(v -> vertx.close())
-					.andThen(ar -> vertx = null);
+		Future<Void> future = vertx.undeploy(s.deploymentID())
+				.compose(na -> {
+					session = null;
+					return s.close();
+				});
 
 		return ContextualFuture.of(future);
 	}
@@ -168,7 +169,8 @@ public class ActiveProxyClient  {
 	 * @return {@code true} if the session is running
 	 */
 	public boolean isRunning() {
-		return session.isRunning();
+		ProxySession s = session;
+		return s != null && s.isRunning();
 	}
 
 	/**
@@ -177,39 +179,51 @@ public class ActiveProxyClient  {
 	 * @return {@code true} if the tunnel is connected
 	 */
 	public boolean isConnected() {
-		return session.isConnected();
+		ProxySession s = session;
+		return s != null && s.isConnected();
 	}
 
 	/**
-	 * Returns whether name (DNS) access has been granted for this session by the super node.
+	 * Returns whether the super node has granted name (DNS) access for this session.
 	 * <p>
 	 * This reflects the value negotiated during authentication and is meaningful only once the
 	 * tunnel is connected.
 	 *
 	 * @return {@code true} if a named endpoint is available
+	 * @throws IllegalStateException if the client is not connected
 	 */
 	public boolean isNameAccessEnabled() {
-		return session.isNameAccessEnabled();
+		ProxySession s = session;
+		if (s == null || !s.isRunning() || !s.isConnected())
+			throw new IllegalStateException("Client is not connected");
+		return s.isNameAccessEnabled();
 	}
 
 	/**
 	 * Returns the public endpoint (scheme + {@code ip:port}) allocated by the super node.
 	 *
-	 * @return the public endpoint, or an empty {@link Optional} if the tunnel is not yet connected
+	 * @return the public endpoint
+	 * @throws IllegalStateException if the client is not connected
 	 */
-	public Optional<String> getEndpoint() {
-		return Optional.ofNullable(session.getEndpoint());
+	public String getEndpoint() {
+		ProxySession s = session;
+		if (s == null || !s.isRunning() || !s.isConnected())
+			throw new IllegalStateException("Client is not connected");
+		return s.getEndpoint();
 	}
 
 	/**
-	 * Returns the public named (DNS) endpoint allocated by the super node, when name access is
+	 * Returns the public named (DNS) endpoint allocated by the super node when name access is
 	 * enabled.
 	 *
-	 * @return the named endpoint, or an empty {@link Optional} if the tunnel is not connected or no
-	 *         named endpoint was assigned
+	 * @return the named endpoint, or an empty {@link Optional} if no named endpoint was assigned
+	 * @throws IllegalStateException if the client is not connected
 	 */
 	public Optional<String> getNamedEndpoint() {
-		return Optional.ofNullable(session.getNamedEndpoint());
+		ProxySession s = session;
+		if (s == null || !s.isRunning() || !s.isConnected())
+			throw new IllegalStateException("Client is not connected");
+		return Optional.ofNullable(s.getNamedEndpoint());
 	}
 
 	/**
@@ -222,7 +236,8 @@ public class ActiveProxyClient  {
 	 * @throws NullPointerException if {@code listener} is {@code null}
 	 */
 	public void addConnectionListener(ConnectionStatusListener listener) {
-		session.addConnectionListener(listener);
+		Objects.requireNonNull(listener, "listener");
+		connectionStatusListener.add(listener);
 	}
 
 	/**
@@ -233,6 +248,36 @@ public class ActiveProxyClient  {
 	 * @param listener the listener to remove
 	 */
 	public void removeConnectionListener(ConnectionStatusListener listener) {
-		session.removeConnectionListener(listener);
+		connectionStatusListener.remove(listener);
+	}
+
+	private static class ListenerArray extends CopyOnWriteArrayList<ConnectionStatusListener> implements ConnectionStatusListener {
+		private static final long serialVersionUID = 3382171779027882437L;
+
+		public ListenerArray() {
+			super();
+		}
+
+		@Override
+		public void connected() {
+			for (ConnectionStatusListener listener : this) {
+				try {
+					listener.connected();
+				} catch (Throwable t) {
+					log.error("Error dispatching connected to listener: {}", listener, t);
+				}
+			}
+		}
+
+		@Override
+		public void disconnected() {
+			for (ConnectionStatusListener listener : this) {
+				try {
+					listener.disconnected();
+				} catch (Throwable t) {
+					log.error("Error dispatching disconnected to listener: {}", listener, t);
+				}
+			}
+		}
 	}
 }

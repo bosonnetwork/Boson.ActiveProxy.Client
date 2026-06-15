@@ -22,13 +22,15 @@
 
 package io.bosonnetwork.activeproxy;
 
+import org.jspecify.annotations.Nullable;
+
 import io.bosonnetwork.BosonException;
 
 /**
  * Signals that a packet could not be processed because it is malformed.
  * <p>
  * This exception indicates issues with the structure, format, or content of a
- * packet being decoded or handled by the Active Proxy protocol — for example a
+ * packet being decoded or handled by the Active Proxy protocol - for example, a
  * truncated packet, a size-header mismatch, an unknown packet type, or a
  * payload that fails decryption.
  * <p>
@@ -39,15 +41,6 @@ public class MalformedPacketException extends BosonException {
 	private static final long serialVersionUID = 8929295156236286962L;
 
 	/**
-	 * Constructs a new exception with {@code null} as its detail message.
-	 * The cause is not initialized, and may subsequently be initialized by a
-	 * call to {@link #initCause}.
-	 */
-	public MalformedPacketException() {
-		super();
-	}
-
-	/**
 	 * Constructs a new exception with the specified detail message.  The
 	 * cause is not initialized, and may subsequently be initialized by
 	 * a call to {@link #initCause}.
@@ -55,7 +48,7 @@ public class MalformedPacketException extends BosonException {
 	 * @param   message   the detail message. The detail message is saved for
 	 *		  later retrieval by the {@link #getMessage()} method.
 	 */
-	public MalformedPacketException(String message) {
+	public MalformedPacketException(@Nullable String message) {
 		super(message);
 	}
 
@@ -72,7 +65,7 @@ public class MalformedPacketException extends BosonException {
 	 *		 permitted, and indicates that the cause is nonexistent or
 	 *		 unknown.)
 	 */
-	public MalformedPacketException(String message, Throwable cause) {
+	public MalformedPacketException(@Nullable String message, @Nullable Throwable cause) {
 		super(message, cause);
 	}
 
@@ -89,7 +82,7 @@ public class MalformedPacketException extends BosonException {
 	 *		 permitted, and indicates that the cause is nonexistent or
 	 *		 unknown.)
 	 */
-	public MalformedPacketException(Throwable cause) {
+	public MalformedPacketException(@Nullable Throwable cause) {
 		super(cause);
 	}
 }

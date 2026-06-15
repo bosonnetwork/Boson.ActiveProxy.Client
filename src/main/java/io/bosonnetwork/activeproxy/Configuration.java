@@ -22,11 +22,12 @@
 
 package io.bosonnetwork.activeproxy;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+
+import org.jspecify.annotations.NullUnmarked;
+import org.jspecify.annotations.Nullable;
 
 import io.bosonnetwork.Id;
 import io.bosonnetwork.crypto.Signature;
@@ -55,24 +56,40 @@ import io.bosonnetwork.utils.Hex;
  */
 public class Configuration {
 	private static final String DEFAULT_SCHEME = "tcp://";
+	private static final int DEFAULT_PORT = 9090;
 
-	private Id servicePeerId;
-	private String serviceHost; // optional
-	private int servicePort;	// optional
+	private final Id servicePeerId;
+	private final @Nullable String serviceHost; // optional
+	private final int servicePort;	// optional
 
-	private Id userId;
-	private Signature.KeyPair userKey;
-	private Signature.KeyPair deviceKey;
+	private final Id userId;
+	private final Signature.@Nullable KeyPair userKey;
+	private final Signature.KeyPair deviceKey;
 
-	private String upstreamHost;
-	private int upstreamPort;
-	private String upstreamScheme;
+	private final String upstreamHost;
+	private final int upstreamPort;
+	private final String upstreamScheme;
 
-	private boolean nameAccess;
-	private boolean announcePeer;
+	private final boolean nameAccess;
+	private final boolean announcePeer;
 
-	private Configuration() {
-		this.upstreamScheme = DEFAULT_SCHEME;
+	private Configuration(Builder builder) {
+		this.servicePeerId = Objects.requireNonNull(builder.servicePeerId, "Missing servicePeerId");
+		this.serviceHost = builder.serviceHost;
+		this.servicePort = builder.servicePort;
+
+		this.userId = Objects.requireNonNull(builder.userId, "Missing userId");
+		this.userKey = builder.userKey;
+		this.deviceKey = Objects.requireNonNull(builder.deviceKey, "Missing deviceKey");
+
+		this.upstreamHost = Objects.requireNonNull(builder.upstreamHost, "Missing upstreamHost");
+		if (builder.upstreamPort <= 0)
+			throw new IllegalArgumentException("Missing or invalid upstreamPort: " + builder.upstreamPort);
+		this.upstreamPort = builder.upstreamPort;
+		this.upstreamScheme = builder.upstreamScheme;
+
+		this.nameAccess = builder.nameAccess;
+		this.announcePeer = builder.announcePeer;
 	}
 
 	/**
@@ -82,8 +99,8 @@ public class Configuration {
 	 * <pre>{@code
 	 * service:
 	 *   peerId: <Base58 peer id>     # required
-	 *   host: <hostname/ip>          # optional; skips DHT lookup when set with port
-	 *   port: <tcp port>             # optional
+	 *   host: <hostname/ip>          # optional; skips DHT lookup when set
+	 *   port: <tcp port>             # optional; defaults to 9090
 	 * client:
 	 *   userId: <Base58 user id>     # required unless userPrivateKey is given
 	 *   userPrivateKey: <Base58|0x>  # optional; derives userId
@@ -103,67 +120,36 @@ public class Configuration {
 	 */
 	public static Configuration fromMap(Map<String, Object> map) throws IllegalArgumentException {
 		ConfigMap cm = new ConfigMap(map);
-		Configuration config = new Configuration();
+		Builder builder = new Builder();
 
 		ConfigMap service = cm.getObject("service");
 		if (service == null || service.isEmpty())
 			throw new IllegalArgumentException("Missing service");
 
-		config.servicePeerId = service.getId("peerId");
-		// optional
-		config.serviceHost = service.getString("host", null);
-		config.servicePort = service.getPort("port", 0);
+		builder.service(service.getId("peerId"));
+		builder.serviceHost(service.getString("host", null));
+		builder.servicePort(service.getPort("port", DEFAULT_PORT));
 
 		ConfigMap client = cm.getObject("client");
 		if (client == null || client.isEmpty())
 			throw new IllegalArgumentException("Missing client");
 
-		config.userId = client.getId("userId", null);
-		String sk = client.getString("userPrivateKey", null);
-		if (sk == null) {
-			if (config.userId == null)
-				throw new IllegalArgumentException("Missing client userId or userPrivateKey");
-		} else {
-			try {
-				config.userKey = Signature.KeyPair.fromPrivateKey(sk.startsWith("0x") ?
-						Hex.decode(sk, 2, sk.length() - 2) :
-						Base58.decode(sk));
-			} catch (Exception e) {
-				throw new IllegalArgumentException("Invalid client userPrivateKey: not a valid Base58 or 0x-hex private key", e);
-			}
-
-			Id uid = Id.of(config.userKey.publicKey().bytes());
-			if (config.userId != null && !config.userId.equals(uid))
-				throw new IllegalArgumentException("Both client userId and userPrivateKey are set, but they don't match");
-			config.userId = uid;
-		}
-
-		sk = client.getString("devicePrivateKey", null);
-		if (sk == null || sk.isEmpty())
-			throw new IllegalArgumentException("Missing client devicePrivateKey");
-
-		try {
-			config.deviceKey = Signature.KeyPair.fromPrivateKey(sk.startsWith("0x") ?
-					Hex.decode(sk, 2, sk.length() - 2) :
-					Base58.decode(sk));
-		} catch (Exception e) {
-			throw new IllegalArgumentException("Invalid client devicePrivateKey: not a valid Base58 or 0x-hex private key", e);
-		}
+		builder.userId(client.getId("userId", null));
+		builder.userKey(client.getString("userPrivateKey", null));
+		builder.deviceKey(client.getString("devicePrivateKey", null));
 
 		ConfigMap upstream = cm.getObject("upstream");
 		if (upstream == null || upstream.isEmpty())
 			throw new IllegalArgumentException("Missing upstream");
 
-		config.upstreamHost = upstream.getString("host", null);
-		if (config.upstreamHost == null || config.upstreamHost.isEmpty())
-			throw new IllegalArgumentException("Missing upstream host");
-		config.upstreamPort = upstream.getPort("port");
-		config.upstreamScheme = upstream.getString("scheme", DEFAULT_SCHEME);
+		builder.upstreamHost(upstream.getString("host", null));
+		builder.upstreamPort(upstream.getPort("port"));
+		builder.upstreamScheme(upstream.getString("scheme", DEFAULT_SCHEME));
 
-		config.nameAccess = cm.getBoolean("nameAccess", false);
-		config.announcePeer = cm.getBoolean("announcePeer", false);
+		builder.nameAccess(cm.getBoolean("nameAccess", false));
+		builder.announcePeer(cm.getBoolean("announcePeer", false));
 
-		return config;
+		return builder.build();
 	}
 
 	/**
@@ -175,6 +161,9 @@ public class Configuration {
 	 * @return a new mutable map representing this configuration
 	 */
 	public Map<String, Object> toMap() {
+		Objects.requireNonNull(servicePeerId, "Malformed configuration: missing servicePeerId");
+		Objects.requireNonNull(upstreamHost, "Malformed configuration: missing upstreamHost");
+
 		Map<String, Object> map = new LinkedHashMap<>();
 
 		Map<String, Object> subMap = new LinkedHashMap<>();
@@ -186,10 +175,10 @@ public class Configuration {
 		map.put("service", subMap);
 
 		subMap = new LinkedHashMap<>();
-		if (userId != null)
-			subMap.put("userId", userId.toString());
 		if (userKey != null)
 			subMap.put("userPrivateKey", Base58.encode(userKey.privateKey().bytes()));
+		else
+			subMap.put("userId", userId.toString());
 		subMap.put("devicePrivateKey", Base58.encode(deviceKey.privateKey().bytes()));
 		map.put("client", subMap);
 
@@ -214,7 +203,7 @@ public class Configuration {
 	/**
 	 * @return the fixed super-node host, or {@code null} to resolve it via the DHT
 	 */
-	public String getServiceHost() {
+	public @Nullable String getServiceHost() {
 		return serviceHost;
 	}
 
@@ -236,7 +225,7 @@ public class Configuration {
 	 * @return the user key pair, or {@code null} if only the user id (not the private key) was
 	 *         supplied
 	 */
-	public Signature.KeyPair getUserKey() {
+	public Signature.@Nullable KeyPair getUserKey() {
 		return userKey;
 	}
 
@@ -300,11 +289,24 @@ public class Configuration {
 	 * <p>
 	 * The builder is not thread-safe.
 	 */
+	@NullUnmarked
 	public static class Builder {
-		private Configuration config;
+		private Id servicePeerId;
+		private String serviceHost; // optional
+		private int servicePort;	// optional
+
+		private Id userId;
+		private Signature.KeyPair userKey;
+		private Signature.KeyPair deviceKey;
+
+		private String upstreamHost;
+		private int upstreamPort;
+		private String upstreamScheme = DEFAULT_SCHEME;
+
+		private boolean nameAccess;
+		private boolean announcePeer;
 
 		private Builder() {
-			config = new Configuration();
 		}
 
 		/**
@@ -330,7 +332,7 @@ public class Configuration {
 		 */
 		public Builder service(Id servicePeerId) {
 			Objects.requireNonNull(servicePeerId, "servicePeerId");
-			config.servicePeerId = servicePeerId;
+			this.servicePeerId = servicePeerId;
 			return this;
 		}
 
@@ -341,8 +343,7 @@ public class Configuration {
 		 * @return this builder
 		 */
 		public Builder serviceHost(String serviceHost) {
-			Objects.requireNonNull(serviceHost, "serviceHost");
-			config.serviceHost = serviceHost;
+			this.serviceHost = serviceHost;
 			return this;
 		}
 
@@ -357,7 +358,7 @@ public class Configuration {
 			if (servicePort <= 0 || servicePort > 65535)
 				throw new IllegalArgumentException("Invalid servicePort: " + servicePort + " (must be 1-65535)");
 
-			config.servicePort = servicePort;
+			this.servicePort = servicePort;
 			return this;
 		}
 
@@ -368,9 +369,8 @@ public class Configuration {
 		 * @return this builder
 		 */
 		public Builder userId(Id userId) {
-			Objects.requireNonNull(userId, "userId");
-			config.userId = userId;
-			config.userKey = null;
+			this.userId = userId;
+			this.userKey = null;
 			return this;
 		}
 
@@ -381,9 +381,8 @@ public class Configuration {
 		 * @return this builder
 		 */
 		public Builder userKey(Signature.KeyPair userKey) {
-			Objects.requireNonNull(userKey, "userKey");
-			config.userKey = userKey;
-			config.userId = Id.of(userKey.publicKey().bytes());
+			this.userKey = userKey;
+			this.userId = userKey == null ? null : Id.of(userKey.publicKey().bytes());
 			return this;
 		}
 
@@ -404,7 +403,12 @@ public class Configuration {
 		 * @throws IllegalArgumentException if the byte length is not a valid private key
 		 */
 		public Builder userKey(byte[] userKey) {
-			Objects.requireNonNull(userKey, "userKey");
+			if (userKey == null) {
+				this.userKey = null;
+				this.userId = null;
+				return this;
+			}
+
 			if (userKey.length != Signature.PrivateKey.BYTES)
 				throw new IllegalArgumentException("Invalid userKey: expected a " + Signature.PrivateKey.BYTES
 						+ "-byte private key, got " + userKey.length + " bytes");
@@ -419,7 +423,12 @@ public class Configuration {
 		 * @return this builder
 		 */
 		public Builder userKey(String userKey) {
-			Objects.requireNonNull(userKey, "userKey");
+			if (userKey == null) {
+				this.userKey = null;
+				this.userId = null;
+				return this;
+			}
+
 			byte[] sk = userKey.startsWith("0x") ?
 					Hex.decode(userKey, 2, userKey.length() - 2) :
 					Base58.decode(userKey);
@@ -434,7 +443,7 @@ public class Configuration {
 		 */
 		public Builder deviceKey(Signature.KeyPair deviceKey) {
 			Objects.requireNonNull(deviceKey, "deviceKey");
-			config.deviceKey = deviceKey;
+			this.deviceKey = deviceKey;
 			return this;
 		}
 
@@ -500,7 +509,7 @@ public class Configuration {
 		 */
 		public Builder upstreamHost(String upstreamHost) {
 			Objects.requireNonNull(upstreamHost, "upstreamHost");
-			config.upstreamHost = upstreamHost;
+			this.upstreamHost = upstreamHost;
 			return this;
 		}
 
@@ -515,7 +524,7 @@ public class Configuration {
 			if (upstreamPort <= 0 || upstreamPort > 65535)
 				throw new IllegalArgumentException("Invalid upstreamPort: " + upstreamPort + " (must be 1-65535)");
 
-			config.upstreamPort = upstreamPort;
+			this.upstreamPort = upstreamPort;
 			return this;
 		}
 
@@ -527,7 +536,7 @@ public class Configuration {
 		 */
 		public Builder upstreamScheme(String scheme) {
 			Objects.requireNonNull(scheme, "scheme");
-			config.upstreamScheme = scheme;
+			this.upstreamScheme = scheme;
 			return this;
 		}
 
@@ -538,7 +547,7 @@ public class Configuration {
 		 * @return this builder
 		 */
 		public Builder nameAccess(boolean nameAccess) {
-			config.nameAccess = nameAccess;
+			this.nameAccess = nameAccess;
 			return this;
 		}
 
@@ -549,37 +558,23 @@ public class Configuration {
 		 * @return this builder
 		 */
 		public Builder announcePeer(boolean announcePeer) {
-			config.announcePeer = announcePeer;
+			this.announcePeer = announcePeer;
 			return this;
 		}
 
 		/**
-		 * Builds an immutable {@link Configuration} from the current builder state and resets the
-		 * builder so it can be reused.
+		 * Builds an immutable {@link Configuration} from the current builder state.
 		 *
 		 * @return the built configuration
-		 * @throws IllegalStateException if the configuration is incomplete; the message names the
-		 *                               missing required fields
+		 * @throws IllegalStateException if the configuration is incomplete or invalid; the message
+		 *                               identifies the offending field
 		 */
 		public Configuration build() {
-			List<String> missing = new ArrayList<>();
-			if (config.servicePeerId == null)
-				missing.add("service peerId");
-			if (config.userId == null)
-				missing.add("client userId or userKey");
-			if (config.deviceKey == null)
-				missing.add("client deviceKey");
-			if (config.upstreamHost == null)
-				missing.add("upstream host");
-			if (config.upstreamPort <= 0)
-				missing.add("upstream port");
-
-			if (!missing.isEmpty())
-				throw new IllegalStateException("Incomplete configuration, missing: " + String.join(", ", missing));
-
-			Configuration c = config;
-			config = new Configuration();
-			return c;
+			try {
+				return new Configuration(this);
+			} catch (NullPointerException | IllegalArgumentException e) {
+				throw new IllegalStateException("Invalid configuration: " + e.getMessage(), e);
+			}
 		}
 	}
 }

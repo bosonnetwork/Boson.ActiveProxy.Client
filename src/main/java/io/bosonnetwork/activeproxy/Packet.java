@@ -27,8 +27,10 @@ import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Objects;
 
 import io.vertx.core.buffer.Buffer;
+import org.jspecify.annotations.Nullable;
 
 import io.bosonnetwork.CryptoContext;
 import io.bosonnetwork.Id;
@@ -41,14 +43,17 @@ import io.bosonnetwork.crypto.Signature;
 // This class is copied from the Active-Proxy service implementation.
 // Keep it synchronized with the original source to avoid divergence.
 @SuppressWarnings("unused")
-class Packet {
-	public static final int VERSION = 1;
-	public static final int HEADER_BYTES = Short.BYTES + Byte.BYTES;
+interface Packet {
+	int VERSION = 1;
+	int HEADER_BYTES = Short.BYTES + Byte.BYTES;
 
-	public static PacketType getType(Buffer packet) throws MalformedPacketException {
-		// noinspection DuplicatedCode
-		if (packet.length() < HEADER_BYTES)
+	private static void requireSize(Buffer packet, int minSize) throws MalformedPacketException {
+		if (packet.length() < minSize)
 			throw new MalformedPacketException("packet too short");
+	}
+
+	static PacketType getType(Buffer packet) throws MalformedPacketException {
+		requireSize(packet, HEADER_BYTES);
 
 		int size = packet.getUnsignedShort(0);
 		if (size != packet.length())
@@ -61,7 +66,7 @@ class Packet {
 		}
 	}
 
-	public record Challenge(byte[] challenge) {
+	record Challenge(byte[] challenge) implements Packet {
 		public static final int MIN_BYTES = Short.BYTES + 32;
 
 		public Buffer encode() {
@@ -73,9 +78,7 @@ class Packet {
 		}
 
 		public static Challenge decode(Buffer packet) throws MalformedPacketException {
-			// noinspection DuplicatedCode
-			if (packet.length() < MIN_BYTES)
-				throw new MalformedPacketException("packet too short");
+			requireSize(packet, MIN_BYTES);
 
 			int size = packet.getUnsignedShort(0);
 			if (size != packet.length())
@@ -99,8 +102,8 @@ class Packet {
 	 *     - deviceSig[challenge]
 	 *     - padding
 	 */
-	public record Auth(int version, Id userId, Id deviceId, CryptoBox.PublicKey clientSessionPk,
-					   boolean nameAccess, byte[] deviceSig) {
+	record Auth(int version, Id userId, Id deviceId, CryptoBox.PublicKey clientSessionPk,
+					   boolean nameAccess, byte[] deviceSig) implements Packet {
 		private static final int SECRET_BYTES = Short.BYTES + Id.BYTES + CryptoBox.PublicKey.BYTES +
 				Byte.BYTES + Signature.BYTES;
 		public static final int BYTES = HEADER_BYTES +  // packet header
@@ -109,7 +112,6 @@ class Packet {
 				SECRET_BYTES;
 
 		public Buffer encode(CryptoContext cryptoContext) {
-			// noinspection DuplicatedCode
 			byte[] padding = randomPadding(BYTES);
 			byte[] secret = new byte[SECRET_BYTES + padding.length];
 
@@ -147,9 +149,7 @@ class Packet {
 		}
 
 		public static Auth decode(Buffer packet, Identity identity) throws MalformedPacketException {
-			// noinspection DuplicatedCode
-			if (packet.length() < BYTES)
-				throw new MalformedPacketException("packet too short");
+			requireSize(packet, BYTES);
 
 			int pos = HEADER_BYTES;
 			Id deviceId = Id.of(packet.getBytes(pos, pos + Id.BYTES));
@@ -195,17 +195,17 @@ class Packet {
 	 *   - namedEndpoint[null terminated string - URL]
 	 *   - padding
 	 */
-	public record AuthAck(CryptoBox.PublicKey serverSessionPk, int maxConnections, boolean nameAccess,
-						  String endpoint, String namedEndpoint) {
+	record AuthAck(CryptoBox.PublicKey serverSessionPk, int maxConnections, boolean nameAccess,
+						  String endpoint, @Nullable String namedEndpoint) implements Packet {
 		private static final int MIN_SECRET_BYTES = CryptoBox.PublicKey.BYTES + Short.BYTES + Byte.BYTES + 2;
 		public static final int MIN_BYTES = HEADER_BYTES + // packet header
 				CryptoBox.Nonce.BYTES + CryptoBox.MAC_BYTES + // encryption header
 				MIN_SECRET_BYTES;
 
 		public Buffer encode(CryptoContext cryptoContext) {
-			// noinspection DuplicatedCode
-			int endpointsSize = (endpoint != null ? endpoint.length() : 0) +
-					(namedEndpoint != null ? namedEndpoint.length() : 0);
+			Objects.requireNonNull(endpoint, "endpoint");
+
+			int endpointsSize = endpoint.length() + (namedEndpoint != null ? namedEndpoint.length() : 0);
 
 			byte[] padding = randomPadding(MIN_BYTES + endpointsSize);
 			byte[] secret = new byte[MIN_SECRET_BYTES + endpointsSize + padding.length];
@@ -219,15 +219,13 @@ class Packet {
 
 			secret[pos++] = (byte)(nameAccess ? 1 : 0);
 
-			if (endpoint != null) {
-				byte[] bytes = endpoint.getBytes(StandardCharsets.UTF_8);
-				System.arraycopy(bytes, 0, secret, pos, bytes.length);
-				pos += bytes.length;
-			}
+			byte[] bytes = endpoint.getBytes(StandardCharsets.UTF_8);
+			System.arraycopy(bytes, 0, secret, pos, bytes.length);
+			pos += bytes.length;
 			secret[pos++] = (byte)0;
 
 			if (namedEndpoint != null) {
-				byte[] bytes = namedEndpoint.getBytes(StandardCharsets.UTF_8);
+				bytes = namedEndpoint.getBytes(StandardCharsets.UTF_8);
 				System.arraycopy(bytes, 0, secret, pos, bytes.length);
 				pos += bytes.length;
 			}
@@ -247,9 +245,7 @@ class Packet {
 		}
 
 		public static AuthAck decode(Buffer packet, CryptoContext cryptoContext) throws MalformedPacketException {
-			// noinspection DuplicatedCode
-			if (packet.length() < MIN_BYTES)
-				throw new MalformedPacketException("packet too short");
+			requireSize(packet, MIN_BYTES);
 
 			int pos = HEADER_BYTES;
 
@@ -314,7 +310,7 @@ class Packet {
 	 *     - deviceSig[challenge]
 	 *     - padding
 	 */
-	public record Attach(Id deviceId, CryptoBox.PublicKey clientSessionPk, byte[] deviceSig) {
+	record Attach(Id deviceId, CryptoBox.PublicKey clientSessionPk, byte[] deviceSig) implements Packet {
 		private static final int SECRET_BYTES = CryptoBox.PublicKey.BYTES + Signature.BYTES;
 		public static final int BYTES = HEADER_BYTES + // packet header
 				Id.BYTES + // plain device id
@@ -322,7 +318,6 @@ class Packet {
 				SECRET_BYTES;
 
 		public Buffer encode(CryptoContext cryptoContext) {
-			// noinspection DuplicatedCode
 			byte[] padding = randomPadding(BYTES);
 			byte[] secret = new byte[SECRET_BYTES + padding.length];
 
@@ -352,9 +347,7 @@ class Packet {
 		}
 
 		public static Attach decode(Buffer packet, Identity identity) throws MalformedPacketException {
-			// noinspection DuplicatedCode
-			if (packet.length() < BYTES)
-				throw new MalformedPacketException("packet too short");
+			requireSize(packet, BYTES);
 
 			int pos = HEADER_BYTES;
 			Id deviceId = Id.of(packet.getBytes(pos, pos + Id.BYTES));
@@ -381,7 +374,7 @@ class Packet {
 		}
 	}
 
-	public record AttachAck() {
+	record AttachAck() implements Packet {
 		public static final int BYTES = HEADER_BYTES;
 		public static final AttachAck INSTANCE = new AttachAck();
 
@@ -394,7 +387,7 @@ class Packet {
 		}
 	}
 
-	public record Ping() {
+	record Ping() implements Packet {
 		public static final int BYTES = HEADER_BYTES;
 		public static final Ping INSTANCE = new Ping();
 
@@ -407,7 +400,7 @@ class Packet {
 		}
 	}
 
-	public record PingAck() {
+	record PingAck() implements Packet {
 		public static final int BYTES = HEADER_BYTES;
 		public static final PingAck INSTANCE = new PingAck();
 
@@ -428,14 +421,13 @@ class Packet {
 	 *   - addr[16 bytes both for IPv4 or IPv6]
 	 *   - padding
 	 */
-	public record Connect(InetAddress address, int port) {
+	record Connect(InetAddress address, int port) implements Packet {
 		private static final int SECRET_BYTES = Short.BYTES + Byte.BYTES + 16;
 		public static final int BYTES = HEADER_BYTES + // packet header
 				CryptoBox.Nonce.BYTES + CryptoBox.MAC_BYTES + // encryption header
 				SECRET_BYTES;
 
 		public Buffer encode(CryptoContext cryptoContext) {
-			// noinspection DuplicatedCode
 			byte[] padding = randomPadding(BYTES);
 			byte[] secret = new byte[SECRET_BYTES + padding.length];
 
@@ -459,9 +451,7 @@ class Packet {
 		}
 
 		public static Connect decode(Buffer packet, CryptoContext cryptoContext) throws MalformedPacketException {
-			// noinspection DuplicatedCode
-			if (packet.length() < BYTES)
-				throw new MalformedPacketException("packet too short");
+			requireSize(packet, BYTES);
 
 			byte[] cipher = packet.getBytes(HEADER_BYTES, packet.length());
 			byte[] secret;
@@ -497,7 +487,7 @@ class Packet {
 	 *   - succeeded[boolean]
 	 *   - padding
 	 */
-	public record ConnectAck(boolean succeeded) {
+	record ConnectAck(boolean succeeded) implements Packet {
 		public static final int BYTES = HEADER_BYTES + Byte.BYTES;
 		public static final ConnectAck SUCCEEDED = new ConnectAck(true);
 		public static final ConnectAck FAILED = new ConnectAck(false);
@@ -507,7 +497,6 @@ class Packet {
 		}
 
 		public Buffer encode() {
-			// noinspection DuplicatedCode
 			byte[] padding = randomPadding(BYTES);
 			int size = BYTES + padding.length;
 			Buffer packet = Buffer.buffer(size);
@@ -521,8 +510,7 @@ class Packet {
 		}
 
 		public static ConnectAck decode(Buffer packet) throws MalformedPacketException {
-			if (packet.length() < BYTES)
-				throw new MalformedPacketException("packet too short");
+			requireSize(packet, BYTES);
 
 			byte b = packet.getByte(HEADER_BYTES);
 			boolean succeeded = (b & 0x01) != 0;
@@ -531,7 +519,7 @@ class Packet {
 
 	}
 
-	public record Disconnect() {
+	record Disconnect() implements Packet {
 		public static final int BYTES = HEADER_BYTES;
 		public static final Disconnect INSTANCE = new Disconnect();
 
@@ -544,7 +532,7 @@ class Packet {
 		}
 	}
 
-	public record DisconnectAck() {
+	record DisconnectAck() implements Packet {
 		public static final int BYTES = HEADER_BYTES;
 		public static final DisconnectAck INSTANCE = new DisconnectAck();
 
@@ -562,12 +550,11 @@ class Packet {
 	 * - encrypted
 	 *   - data
 	 */
-	public record Data(byte[] data) {
+	record Data(byte[] data) implements Packet {
 		public static final int MIN_BYTES = HEADER_BYTES + // packet header
 			CryptoBox.Nonce.BYTES + CryptoBox.MAC_BYTES;
 
 		public Buffer encode(CryptoContext cryptoContext) {
-			// noinspection DuplicatedCode
 			byte[] cipher = cryptoContext.encrypt(data);
 			int size = HEADER_BYTES + cipher.length;
 			Buffer packet = Buffer.buffer(size);
@@ -578,9 +565,7 @@ class Packet {
 		}
 
 		public static Data decode(Buffer packet, CryptoContext cryptoContext) throws MalformedPacketException {
-			// noinspection DuplicatedCode
-			if (packet.length() < MIN_BYTES)
-				throw new MalformedPacketException("packet too short");
+			requireSize(packet, MIN_BYTES);
 
 			byte[] cipher = packet.getBytes(HEADER_BYTES, packet.length());
 			byte[] payload;
@@ -594,14 +579,13 @@ class Packet {
 		}
 	}
 
-	public record Error(short code, String message) {
+	record Error(short code, @Nullable String message) implements Packet {
 		private static final int MIN_SECRET_BYTES = Short.BYTES + 1;
 		public static final int MIN_BYTES = HEADER_BYTES +
 				CryptoBox.Nonce.BYTES + CryptoBox.MAC_BYTES + // encryption header
 				MIN_SECRET_BYTES;
 
 		public Buffer encode(CryptoContext cryptoContext) {
-			// noinspection DuplicatedCode
 			int messageLen = message != null ? message.length() : 0;
 			byte[] padding = randomPadding(MIN_BYTES + messageLen);
 			byte[] secret = new byte[MIN_SECRET_BYTES + messageLen + padding.length];
@@ -631,9 +615,7 @@ class Packet {
 		}
 
 		public static Error decode(Buffer packet, CryptoContext cryptoContext) throws MalformedPacketException {
-			// noinspection DuplicatedCode
-			if (packet.length() < MIN_BYTES)
-				throw new MalformedPacketException("packet too short");
+			requireSize(packet, MIN_BYTES);
 
 			byte[] cipher = packet.getBytes(HEADER_BYTES, packet.length());
 			byte[] secret;
@@ -665,7 +647,6 @@ class Packet {
 	}
 
 	private static Buffer encodeWithEmptyPayload(PacketType type) {
-		// noinspection DuplicatedCode
 		byte[] padding = randomPadding(HEADER_BYTES);
 		int size = HEADER_BYTES + padding.length;
 
@@ -676,13 +657,13 @@ class Packet {
 		return packet;
 	}
 
-	protected static int paddingSize(int size) {
+	private static int paddingSize(int size) {
 		// round up to the nearest multiple of 256
 		int bound = ((size + 255) & ~255);
 		return Random.secureRandom().nextInt(bound - size + 1);
 	}
 
-	protected static byte[] randomPadding(int size) {
+	private static byte[] randomPadding(int size) {
 		byte[] padding = new byte[paddingSize(size)];
 		if (padding.length > 0)
 			Random.secureRandom().nextBytes(padding);
