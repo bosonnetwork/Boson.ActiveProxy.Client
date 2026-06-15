@@ -25,8 +25,6 @@ package io.bosonnetwork.activeproxy;
 import java.net.InetAddress;
 import java.net.URI;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -93,12 +91,8 @@ class ProxySession extends BosonVerticle {
 	private long nextConnectionId;
 	private int maxConnections;
 	private int connectFailures;
-	private int inFlight;
 	private int pendingConnects;	// connections currently being dialed but not yet established
-	// Maps each established connection to its busy state: TRUE while relaying (in-flight), FALSE while
-	// idle. inFlight is kept equal to the number of TRUE entries, so it cannot leak when a busy
-	// connection is torn down abnormally (which goes through close(), not the idle handshake).
-	private final Map<ProxyConnection, Boolean> connections;
+	private final ConnectionRegistry<ProxyConnection> connections;
 
 	private long periodicCheckTimer;
 	private volatile boolean running;
@@ -123,10 +117,9 @@ class ProxySession extends BosonVerticle {
 
 		this.nextConnectionId = 0;
 		this.maxConnections = 1;
-		this.connections = new HashMap<>();
+		this.connections = new ConnectionRegistry<>();
 		this.connected = false;
 		this.connectFailures = 0;
-		this.inFlight = 0;
 		this.pendingConnects = 0;
 
 		this.running = false;
@@ -261,9 +254,8 @@ class ProxySession extends BosonVerticle {
 
 		vertx.cancelTimer(periodicCheckTimer);
 
-		connections.keySet().forEach(c -> c.close(true));
+		List.copyOf(connections.connections()).forEach(c -> c.close(true));
 		connections.clear();
-		inFlight = 0;
 
 		if (connected) {
 			connected = false;
@@ -301,24 +293,24 @@ class ProxySession extends BosonVerticle {
 
 		lastIdleCheckTimestamp = now;
 		log.info("STATUS: session={}, connections={}, inFlight={}, idleTime={}",
-				servicePeerId, connections.size(), inFlight,
+				servicePeerId, connections.size(), connections.inFlight(),
 				idleTimestamp == 0 ? 0 : Duration.ofMillis(now - idleTimestamp));
 
-		if (inFlight != 0 || idleTimestamp == 0 || connections.size() <= 1 || now - idleTimestamp < MAX_IDLE_TIME)
+		if (connections.inFlight() != 0 || idleTimestamp == 0 || connections.size() <= 1 || now - idleTimestamp < MAX_IDLE_TIME)
 			return;
 
 		log.info("Session {} closing the idle connections...", servicePeerId);
-		Iterator<Map.Entry<ProxyConnection, Boolean>> iterator = connections.entrySet().iterator();
-		while (connections.size() > 1 && iterator.hasNext()) {
-			Map.Entry<ProxyConnection, Boolean> entry = iterator.next();
-			ProxyConnection c = entry.getKey();
-			iterator.remove();
+		// All connections are idle here (inFlight == 0); keep one and close the rest.
+		List<ProxyConnection> idle = List.copyOf(connections.connections());
+		for (int i = 1; i < idle.size(); i++) {
+			ProxyConnection c = idle.get(i);
+			connections.remove(c);
 			c.close(true);
 		}
 	}
 
 	private void healthCheck() {
-		List<ProxyConnection> cs = List.copyOf(connections.keySet());
+		List<ProxyConnection> cs = List.copyOf(connections.connections());
 		cs.forEach(ProxyConnection::healthCheck);
 	}
 
@@ -358,7 +350,7 @@ class ProxySession extends BosonVerticle {
 		// A new connection is needed only when there is no idle (or pending) spare ready to serve the
 		// next CONNECT. Idle established = connections.size() - inFlight; pending dials will become
 		// idle once established.
-		int spares = (connections.size() - inFlight) + pendingConnects;
+		int spares = (connections.size() - connections.inFlight()) + pendingConnects;
 		return spares == 0;
 	}
 
@@ -402,7 +394,7 @@ class ProxySession extends BosonVerticle {
 				long connectionId = nextConnectionId++;
 				log.info("Created new proxy connection {} to service {}@{}", connectionId, servicePeerId, serviceAddress);
 				ProxyConnection connection = new ProxyConnection(connectionId, vertxContext, peerContext, sessionContext, ar.result(), connectionHandler);
-				connections.put(connection, Boolean.FALSE);	// starts idle until it relays
+				connections.add(connection);	// starts idle until it relays
 			} else {
 				connectFailures++;
 				if (log.isDebugEnabled())
@@ -481,8 +473,7 @@ class ProxySession extends BosonVerticle {
 	}
 
 	private void connectionClosedHandler(ProxyConnection connection) {
-		if (connections.remove(connection) == Boolean.TRUE)
-			--inFlight;	// torn down while still relaying; keep inFlight accurate
+		connections.remove(connection);	// keeps inFlight accurate even if torn down while relaying
 		if (connections.isEmpty()) {
 			log.warn("Proxy session {} is dangling ...", servicePeerId);
 			danglingTimestamp = System.currentTimeMillis();
@@ -504,16 +495,12 @@ class ProxySession extends BosonVerticle {
 	}
 
 	private void connectionIdleHandler(ProxyConnection connection) {
-		// Only decrement when transitioning busy -> idle, so repeated idle callbacks cannot underflow.
-		if (connections.replace(connection, Boolean.FALSE) == Boolean.TRUE && --inFlight == 0)
+		if (connections.markIdle(connection) && connections.inFlight() == 0)
 			idleTimestamp = System.currentTimeMillis();
 	}
 
 	private void connectionBusyHandler(ProxyConnection connection) {
-		// Only increment on a real idle -> busy transition; replace() is a no-op if the connection was
-		// already removed, so a late busy callback cannot resurrect it or over-count.
-		if (connections.replace(connection, Boolean.TRUE) == Boolean.FALSE)
-			++inFlight;
+		connections.markBusy(connection);
 		idleTimestamp = 0;
 		if (needsNewConnection())
 			connect();
