@@ -95,6 +95,9 @@ class ProxySession extends BosonVerticle {
 	private int connectFailures;
 	private int inFlight;
 	private int pendingConnects;	// connections currently being dialed but not yet established
+	// Maps each established connection to its busy state: TRUE while relaying (in-flight), FALSE while
+	// idle. inFlight is kept equal to the number of TRUE entries, so it cannot leak when a busy
+	// connection is torn down abnormally (which goes through close(), not the idle handshake).
 	private final Map<ProxyConnection, Boolean> connections;
 
 	private long periodicCheckTimer;
@@ -399,7 +402,7 @@ class ProxySession extends BosonVerticle {
 				long connectionId = nextConnectionId++;
 				log.info("Created new proxy connection {} to service {}@{}", connectionId, servicePeerId, serviceAddress);
 				ProxyConnection connection = new ProxyConnection(connectionId, vertxContext, peerContext, sessionContext, ar.result(), connectionHandler);
-				connections.put(connection, Boolean.TRUE);
+				connections.put(connection, Boolean.FALSE);	// starts idle until it relays
 			} else {
 				connectFailures++;
 				if (log.isDebugEnabled())
@@ -478,7 +481,8 @@ class ProxySession extends BosonVerticle {
 	}
 
 	private void connectionClosedHandler(ProxyConnection connection) {
-		connections.remove(connection);
+		if (connections.remove(connection) == Boolean.TRUE)
+			--inFlight;	// torn down while still relaying; keep inFlight accurate
 		if (connections.isEmpty()) {
 			log.warn("Proxy session {} is dangling ...", servicePeerId);
 			danglingTimestamp = System.currentTimeMillis();
@@ -499,13 +503,17 @@ class ProxySession extends BosonVerticle {
 			connect();
 	}
 
-	private void connectionIdleHandler(@SuppressWarnings("unused") ProxyConnection connection) {
-		if (--inFlight == 0)
+	private void connectionIdleHandler(ProxyConnection connection) {
+		// Only decrement when transitioning busy -> idle, so repeated idle callbacks cannot underflow.
+		if (connections.replace(connection, Boolean.FALSE) == Boolean.TRUE && --inFlight == 0)
 			idleTimestamp = System.currentTimeMillis();
 	}
 
-	private void connectionBusyHandler(@SuppressWarnings("unused") ProxyConnection connection) {
-		++inFlight;
+	private void connectionBusyHandler(ProxyConnection connection) {
+		// Only increment on a real idle -> busy transition; replace() is a no-op if the connection was
+		// already removed, so a late busy callback cannot resurrect it or over-count.
+		if (connections.replace(connection, Boolean.TRUE) == Boolean.FALSE)
+			++inFlight;
 		idleTimestamp = 0;
 		if (needsNewConnection())
 			connect();
