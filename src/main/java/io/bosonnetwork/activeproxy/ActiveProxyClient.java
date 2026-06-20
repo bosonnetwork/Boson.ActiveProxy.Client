@@ -27,6 +27,7 @@ import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import io.vertx.core.Context;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import org.jspecify.annotations.Nullable;
@@ -93,7 +94,15 @@ public class ActiveProxyClient {
 		if (config.getServiceHost() == null || config.getServicePort() == 0)
 			Objects.requireNonNull(node, "node is required if service host/port is not configured");
 
-		Vertx v = vertx != null ? vertx : (node != null ? node.unwrap(Vertx.class).orElse(null) : null);
+		// Resolve the Vert.x instance: use the provided one, the current context, or the node's instance
+		Vertx v = vertx;
+		if (v == null) {
+			Context currentContext = Vertx.currentContext();
+			v = currentContext != null ? currentContext.owner() : null;
+		}
+		if (v == null)
+			v = node != null ? node.unwrap(Vertx.class).orElse(null) : null;
+
 		this.vertx = Objects.requireNonNull(v, "No Vertx instance available: provide a Vertx, or a Node that exposes one");
 
 		this.node = node;
