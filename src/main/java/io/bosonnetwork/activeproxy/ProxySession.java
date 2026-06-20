@@ -31,6 +31,7 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 import io.vertx.core.Future;
+import io.vertx.core.Vertx;
 import io.vertx.core.net.NetClient;
 import io.vertx.core.net.NetClientOptions;
 import io.vertx.core.net.NetSocket;
@@ -209,6 +210,7 @@ class ProxySession extends BosonVerticle {
 
 	@Override
 	protected Future<Void> deploy() {
+		Vertx vertx = requireInitialized(this.vertx, "vertx");
 		proxyClient = vertx.createNetClient(new NetClientOptions()
 				.setSsl(false)
 				.setConnectTimeout(PROXY_SOCKET_CONNECT_TIMEOUT)
@@ -246,6 +248,7 @@ class ProxySession extends BosonVerticle {
 		if (!running)
 			return Future.succeededFuture();
 
+		Vertx vertx = requireInitialized(this.vertx, "vertx");
 		NetClient proxyClient = requireInitialized(this.proxyClient, "proxyClient");
 		NetClient upstreamClient = requireInitialized(this.upstreamClient, "upstreamClient");
 
@@ -381,6 +384,7 @@ class ProxySession extends BosonVerticle {
 	}
 
 	private Future<Void> connect() {
+		Vertx vertx = requireInitialized(this.vertx, "vertx");
 		// Count this dial as pending until it settles, so needsNewConnection() won't launch a
 		// redundant CONNECT (or exceed maxConnections) while it is in flight.
 		pendingConnects++;
@@ -393,7 +397,8 @@ class ProxySession extends BosonVerticle {
 			if (ar.succeeded()) {
 				long connectionId = nextConnectionId++;
 				log.info("Created new proxy connection {} to service {}@{}", connectionId, servicePeerId, serviceAddress);
-				ProxyConnection connection = new ProxyConnection(connectionId, vertxContext, peerContext, sessionContext, ar.result(), connectionHandler);
+				ProxyConnection connection = new ProxyConnection(connectionId,
+						requireInitialized(vertxContext, "vertxContext"), peerContext, sessionContext, ar.result(), connectionHandler);
 				connections.add(connection);	// starts idle until it relays
 			} else {
 				connectFailures++;
@@ -473,6 +478,7 @@ class ProxySession extends BosonVerticle {
 	}
 
 	private void connectionClosedHandler(ProxyConnection connection) {
+		Vertx vertx = requireInitialized(this.vertx, "vertx");
 		connections.remove(connection);	// keeps inFlight accurate even if torn down while relaying
 		if (connections.isEmpty()) {
 			log.warn("Proxy session {} is dangling ...", servicePeerId);

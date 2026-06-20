@@ -93,7 +93,7 @@ public class ActiveProxyClient {
 		if (config.getServiceHost() == null || config.getServicePort() == 0)
 			Objects.requireNonNull(node, "node is required if service host/port is not configured");
 
-		Vertx v = vertx != null ? vertx : (node != null ? node.unwrap(Vertx.class) : null);
+		Vertx v = vertx != null ? vertx : (node != null ? node.unwrap(Vertx.class).orElse(null) : null);
 		this.vertx = Objects.requireNonNull(v, "No Vertx instance available: provide a Vertx, or a Node that exposes one");
 
 		this.node = node;
