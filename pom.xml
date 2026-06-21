@@ -13,7 +13,7 @@
 
     <groupId>io.bosonnetwork</groupId>
     <artifactId>boson-active-proxy-client</artifactId>
-    <version>3.0.1-SNAPSHOT</version>
+    <version>3.0.1</version>
     <packaging>jar</packaging>
 
     <name>Boson Active Proxy Client</name>
@@ -64,7 +64,7 @@
             <dependency>
                 <groupId>io.bosonnetwork</groupId>
                 <artifactId>boson-dependencies</artifactId>
-                <version>3.0.1-SNAPSHOT</version>
+                <version>3.0.1</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
