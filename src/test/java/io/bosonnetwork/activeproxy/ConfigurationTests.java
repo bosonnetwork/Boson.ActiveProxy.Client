@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterAll;
@@ -20,7 +21,7 @@ import io.bosonnetwork.utils.Hex;
 import io.bosonnetwork.json.Json;
 
 public class ConfigurationTests {
-	private static final Path testDir = Path.of(System.getProperty("java.io.tmpdir"), "boson", "ActiveProxyClient");
+	private static final Path testDir = Paths.get(System.getProperty("java.io.tmpdir"), "boson", "ActiveProxyClient");
 
 	@BeforeAll
 	static void setup() throws Exception {
