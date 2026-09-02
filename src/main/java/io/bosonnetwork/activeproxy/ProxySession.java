@@ -233,11 +233,11 @@ class ProxySession extends BosonVerticle {
 		running = true;
 		return connect().andThen(ar -> {
 			if (ar.succeeded()) {
-				vertx.cancelTimer(periodicCheckTimer);
-				periodicCheckTimer = 0;
 				log.debug("Proxy session {} started", servicePeerId);
 			} else {
 				running = false;
+				vertx.cancelTimer(periodicCheckTimer);
+				periodicCheckTimer = 0;
 				log.error("Proxy session {} failed to start", servicePeerId, ar.cause());
 			}
 		});
@@ -256,6 +256,7 @@ class ProxySession extends BosonVerticle {
 		running = false;
 
 		vertx.cancelTimer(periodicCheckTimer);
+		periodicCheckTimer = 0;
 
 		List.copyOf(connections.connections()).forEach(c -> c.close(true));
 		connections.clear();
@@ -323,10 +324,12 @@ class ProxySession extends BosonVerticle {
 			return;
 
 		log.info("Session {} announcing peer info {} ...", servicePeerId, peerInfo);
-		node.announcePeer(peerInfo).thenRun(() -> {
-			log.info("Session {} peer info announced", servicePeerId);
-			lastAnnounceTimestamp = now;
-		}).exceptionally(e -> {
+		// Claim the interval before the announce is dispatched: the periodic check runs while the
+		// announce is still in flight and would otherwise fire a duplicate on every tick.
+		lastAnnounceTimestamp = now;
+		node.announcePeer(peerInfo).thenRun(() ->
+			log.info("Session {} peer info announced", servicePeerId)
+		).exceptionally(e -> {
 			log.error("Session {} failed to announce peer info", servicePeerId, e);
 			// retry after 1 minute
 			lastAnnounceTimestamp = now - RE_ANNOUNCE_INTERVAL + 60000;
@@ -458,8 +461,13 @@ class ProxySession extends BosonVerticle {
 			} else {
 				pb.endpoint(endpoint);
 			}
-			this.peerInfo = pb.build();
+			PeerInfo newPeerInfo = pb.build();
+			// A reconnect can hand back a different endpoint; publish it immediately rather than
+			// leaving the stale one in the DHT until the re-announce interval elapses.
+			if (!Objects.equals(peerInfo, newPeerInfo))
+				lastAnnounceTimestamp = 0;
 
+			this.peerInfo = newPeerInfo;
 			tryAnnouncePeer();
 		}
 
