@@ -119,37 +119,7 @@ public class Configuration {
 	 * @throws IllegalArgumentException if a required section/field is missing or a value is invalid
 	 */
 	public static Configuration fromMap(Map<String, Object> map) throws IllegalArgumentException {
-		ConfigMap cm = new ConfigMap(map);
-		Builder builder = new Builder();
-
-		ConfigMap service = cm.getObject("service");
-		if (service == null || service.isEmpty())
-			throw new IllegalArgumentException("Missing service");
-
-		builder.service(service.getId("peerId"));
-		builder.serviceHost(service.getString("host", null));
-		builder.servicePort(service.getPort("port", DEFAULT_PORT));
-
-		ConfigMap client = cm.getObject("client");
-		if (client == null || client.isEmpty())
-			throw new IllegalArgumentException("Missing client");
-
-		builder.userId(client.getId("userId", null));
-		builder.userKey(client.getString("userPrivateKey", null));
-		builder.deviceKey(client.getString("devicePrivateKey", null));
-
-		ConfigMap upstream = cm.getObject("upstream");
-		if (upstream == null || upstream.isEmpty())
-			throw new IllegalArgumentException("Missing upstream");
-
-		builder.upstreamHost(upstream.getString("host", null));
-		builder.upstreamPort(upstream.getPort("port"));
-		builder.upstreamScheme(upstream.getString("scheme", DEFAULT_SCHEME));
-
-		builder.nameAccess(cm.getBoolean("nameAccess", false));
-		builder.announcePeer(cm.getBoolean("announcePeer", false));
-
-		return builder.build();
+		return new Builder().fromMap(map).build();
 	}
 
 	/**
@@ -284,8 +254,9 @@ public class Configuration {
 	 * Fluent builder for {@link Configuration}.
 	 * <p>
 	 * Set the service peer, the client identity (a user id or user key, plus a device key), and the
-	 * upstream service, then call {@link #build()}. A builder is reusable: each {@link #build()}
-	 * returns a snapshot and resets the builder to an empty state.
+	 * upstream service, then call {@link #build()}. A builder is reusable: {@link #build()} returns a
+	 * snapshot of the current state and leaves that state intact, so it may be called repeatedly,
+	 * optionally with setters applied in between.
 	 * <p>
 	 * The builder is not thread-safe.
 	 */
@@ -342,7 +313,7 @@ public class Configuration {
 		 * @param serviceHost the super-node host
 		 * @return this builder
 		 */
-		public Builder serviceHost(String serviceHost) {
+		public Builder serviceHost(@Nullable String serviceHost) {
 			this.serviceHost = serviceHost;
 			return this;
 		}
@@ -369,6 +340,7 @@ public class Configuration {
 		 * @return this builder
 		 */
 		public Builder userId(Id userId) {
+			Objects.requireNonNull(userId, "userId");
 			this.userId = userId;
 			this.userKey = null;
 			return this;
@@ -380,7 +352,7 @@ public class Configuration {
 		 * @param userKey the user key pair
 		 * @return this builder
 		 */
-		public Builder userKey(Signature.KeyPair userKey) {
+		public Builder userKey(Signature.@Nullable KeyPair userKey) {
 			this.userKey = userKey;
 			this.userId = userKey == null ? null : Id.of(userKey.publicKey().bytes());
 			return this;
@@ -402,7 +374,7 @@ public class Configuration {
 		 * @return this builder
 		 * @throws IllegalArgumentException if the byte length is not a valid private key
 		 */
-		public Builder userKey(byte[] userKey) {
+		public Builder userKey(byte @Nullable [] userKey) {
 			if (userKey == null) {
 				this.userKey = null;
 				this.userId = null;
@@ -422,7 +394,7 @@ public class Configuration {
 		 * @param userKey the encoded private key
 		 * @return this builder
 		 */
-		public Builder userKey(String userKey) {
+		public Builder userKey(@Nullable String userKey) {
 			if (userKey == null) {
 				this.userKey = null;
 				this.userId = null;
@@ -559,6 +531,58 @@ public class Configuration {
 		 */
 		public Builder announcePeer(boolean announcePeer) {
 			this.announcePeer = announcePeer;
+			return this;
+		}
+
+		/**
+		 * Applies a parsed YAML/JSON configuration map to this builder.
+		 * <p>
+		 * The accepted structure is the one documented on {@link Configuration#fromMap(Map)}. The
+		 * client identity may be given as {@code userId}, as {@code userPrivateKey}, or as both; the
+		 * private key is applied last and therefore wins, supplying the user id itself.
+		 * <p>
+		 * Absent optional keys are applied as their defaults rather than skipped, so this
+		 * <em>overwrites</em> the corresponding builder state instead of merging into it: calling
+		 * {@code nameAccess(true).fromMap(map)} with a map that has no {@code nameAccess} key leaves
+		 * name access disabled. Apply setters after this method, not before, to override what the map
+		 * specifies.
+		 *
+		 * @param map the configuration map
+		 * @return this builder
+		 * @throws IllegalArgumentException if a required section/field is missing or a value is invalid
+		 */
+		public Builder fromMap(Map<String, Object> map) throws IllegalArgumentException {
+			ConfigMap cm = new ConfigMap(map);
+
+			ConfigMap service = cm.getObject("service");
+			if (service == null || service.isEmpty())
+				throw new IllegalArgumentException("Missing service");
+
+			service(service.getId("peerId"));
+			serviceHost(service.getString("host", null));
+			servicePort(service.getPort("port", DEFAULT_PORT));
+
+			ConfigMap client = cm.getObject("client");
+			if (client == null || client.isEmpty())
+				throw new IllegalArgumentException("Missing client");
+
+			if (client.containsKey("userId"))
+				userId(client.getId("userId", null));
+			if (client.containsKey("userPrivateKey"))
+				userKey(client.getString("userPrivateKey", null));
+			deviceKey(client.getString("devicePrivateKey"));
+
+			ConfigMap upstream = cm.getObject("upstream");
+			if (upstream == null || upstream.isEmpty())
+				throw new IllegalArgumentException("Missing upstream");
+
+			upstreamHost(upstream.getString("host"));
+			upstreamPort(upstream.getPort("port"));
+			upstreamScheme(upstream.getString("scheme", DEFAULT_SCHEME));
+
+			nameAccess(cm.getBoolean("nameAccess", false));
+			announcePeer(cm.getBoolean("announcePeer", false));
+
 			return this;
 		}
 
