@@ -490,11 +490,14 @@ class ProxySession extends BosonVerticle {
 	private void connectionClosedHandler(ProxyConnection connection) {
 		Vertx vertx = requireInitialized(this.vertx, "vertx");
 		connections.remove(connection);	// keeps inFlight accurate even if torn down while relaying
+		if (!running)
+			return;
+
 		if (connections.isEmpty()) {
 			log.warn("Proxy session {} is dangling ...", servicePeerId);
 			danglingTimestamp = System.currentTimeMillis();
 			vertx.setTimer(STOP_DELAY, unused -> {
-				if (danglingTimestamp > 0 && System.currentTimeMillis() - danglingTimestamp >= STOP_DELAY) {
+				if (running && danglingTimestamp > 0 && System.currentTimeMillis() - danglingTimestamp >= STOP_DELAY) {
 					log.info("Proxy session {} disconnected, reset session to reconnect", servicePeerId);
 					reset();
 					runOnContext(v -> {
