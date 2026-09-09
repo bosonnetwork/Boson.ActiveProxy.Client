@@ -420,7 +420,9 @@ class ProxySession extends BosonVerticle {
 					});
 				}
 			}
-		}).mapEmpty();
+		}).recover(e ->
+				Future.succeededFuture()
+		).mapEmpty();
 	}
 
 	private void connectionChallengeHandler(ProxyConnection connection, byte[] challenge) {
