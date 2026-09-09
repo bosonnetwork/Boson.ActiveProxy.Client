@@ -309,7 +309,7 @@ public final class Launcher {
 	 */
 	private static Path lockFile(Configuration config) {
 		Id deviceId = Id.of(config.getDeviceKey().publicKey().bytes());
-		return FileUtils.getUserDataDir()
+		return FileUtils.getUserStateDir()
 				.resolve("boson")
 				.resolve("client")
 				.resolve("active-proxy-" + deviceId + ".lock");
@@ -572,8 +572,9 @@ public final class Launcher {
 
 			@Override
 			public void disconnected() {
-				System.out.println("Disconnected from the Active Proxy service " + config.getServicePeerId() +
-						", reconnecting ...");
+				if (client != null)
+					System.out.println("Disconnected from the Active Proxy service " + config.getServicePeerId() +
+							", reconnecting ...");
 			}
 		});
 
