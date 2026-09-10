@@ -17,13 +17,17 @@ client:
   devicePrivateKey: 65z3qLiMmn6zZJNWHxY9GsXst9u7QKDfnk8co4JqNAKjL1xTZvj2cxs3a9svGNrkGheCcM1fpZV1dSGheYZ7EFFx
 
 # Upstream server configuration.
-# The host and port are mandatory, The scheme is optional, defaults to "tcp://".
+# The host and port are mandatory. The scheme is optional and defaults to "http"; it is the URI
+# scheme of the upstream service and becomes the scheme of the port-mapped public endpoint.
+# Services that do not speak HTTP should set their own, for example "tcp", "ssh" or "mqtt".
 upstream:
   host: 127.0.0.1
   port: 8888
-  scheme: http://
+  scheme: http
 
-# Enables name-based access to the proxied endpoint.
+# Enables name-based access to the proxied endpoint, served as https://<name>.
+# The super node terminates TLS and routes by the HTTP Host header, so this requires an "http"
+# upstream scheme.
 # This feature depends on the service peer’s capabilities and the client’s subscription level.
 # Optional. Defaults to false.
 nameAccess: false

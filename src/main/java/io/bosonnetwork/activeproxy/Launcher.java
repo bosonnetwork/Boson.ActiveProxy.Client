@@ -282,7 +282,10 @@ public final class Launcher {
 		try {
 			config = Configuration.fromMap(map);
 		} catch (IllegalArgumentException | IllegalStateException e) {
-			throw new ConfigException("Invalid configuration in " + path + ": " + describe(e), e);
+			// build() wraps the offending field's error as "Invalid configuration: ..."; report the
+			// field's own message, since this one already says it is the configuration that is bad.
+			Throwable reason = e instanceof IllegalStateException && e.getCause() != null ? e.getCause() : e;
+			throw new ConfigException("Invalid configuration in " + path + ": " + describe(reason), e);
 		}
 
 		// The launcher runs without a DHT node, so the service peer cannot be looked up.

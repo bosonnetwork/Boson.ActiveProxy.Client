@@ -59,7 +59,7 @@ A **Boson Super Node** running the Active Proxy service acts as the public relay
 
 1. **Startup** — The client resolves the Active Proxy service peer via a DHT `FIND_PEER` lookup using the configured `peerId`, then opens a TCP connection to the super node.
 2. **Handshake** — A mutual challenge–response exchange authenticates the client using its Ed25519 user and device keys. The channel is then encrypted with NaCl `CryptoBox` (X25519 + XSalsa20-Poly1305).
-3. **Attach** — The client registers its upstream service address with the super node, which allocates a public endpoint (`ip:port`, and optionally a DNS hostname for subscribed users).
+3. **Attach** — The client registers its upstream service address with the super node, which allocates a public endpoint (`ip:port`, and optionally a DNS hostname served over HTTPS for subscribed users; see [Public endpoints](#public-endpoints)).
 4. **Data relay** — For each incoming external TCP connection, the super node sends a `CONNECT` packet through the tunnel. The client opens a new connection to the local upstream service and bridges the two streams until either side disconnects.
 5. **Keepalive** — `PING`/`PING_ACK` packets keep the tunnel alive and detect network failures.
 
@@ -135,9 +135,10 @@ client:
 upstream:
   host: 127.0.0.1
   port: 8888
-  scheme: http://    # informational; defaults to tcp://
+  scheme: http       # URI scheme of the upstream; defaults to http
 
-# Request a DNS hostname from the super node (requires subscription).
+# Request a DNS hostname from the super node, served as https://<name>.
+# Requires an http upstream, and the super node may decline it (subscription).
 nameAccess: false
 
 # Announce the proxied endpoint to the DHT for peer discovery.
@@ -156,24 +157,38 @@ announcePeer: false
 | `client` | `devicePrivateKey` | Yes | Device-specific Ed25519 private key. Identifies this device to the service. |
 | `upstream` | `host` | Yes | Host of the local service to expose. |
 | `upstream` | `port` | Yes | Port of the local service to expose. |
-| `upstream` | `scheme` | No | Protocol hint (e.g. `http://`, `tcp://`). Defaults to `tcp://`. |
-| — | `nameAccess` | No | Request a DNS name for the public endpoint. Defaults to `false`. |
+| `upstream` | `scheme` | No | URI scheme of the upstream (`http`, `https`, `tcp`, `ssh`, ...), used as the scheme of the port-mapped endpoint. Case-insensitive; a trailing `://` is accepted and removed. Defaults to `http`, so non-HTTP services should set it. |
+| — | `nameAccess` | No | Request a DNS name for the public endpoint, served as `https://<name>`. Requires `scheme: http`. Defaults to `false`. |
 | — | `announcePeer` | No | Announce the proxied endpoint to the DHT. Defaults to `false`. |
 
 ### Programmatic configuration
 
 ```java
 Configuration config = Configuration.builder()
-    .servicePeerId(Id.of("GbRwG3WgKgApSDBr9FGo5Y3RssSWxfWhanXMBdPCo5F2"))
+    .service(Id.of("GbRwG3WgKgApSDBr9FGo5Y3RssSWxfWhanXMBdPCo5F2"))   // or service(peerId, host, port)
     .userKey("<Base58-private-key>")        // derives userId automatically
     .deviceKey("<Base58-private-key>")
-    .upstreamHost("127.0.0.1")
-    .upstreamPort(8888)
-    .upstreamScheme("http://")
+    .upstream("127.0.0.1", 8888, "http")
     .nameAccess(false)
     .announcePeer(false)
     .build();
 ```
+
+`build()` throws `IllegalStateException` naming the offending field when the configuration is incomplete or inconsistent, for example name access with a non-`http` upstream.
+
+### Public endpoints
+
+Once connected, the super node allocates up to two public endpoints:
+
+| Endpoint | Form | Notes |
+|---|---|---|
+| Port-mapped | `<upstream scheme>://<ip>:<port>` | Always allocated. Bytes are relayed unchanged, so it speaks whatever the upstream speaks, including end-to-end TLS for an `https` upstream. |
+| Named | `https://<name>` | Only with `nameAccess: true`, when the super node grants it. |
+
+The named endpoint is fronted by the super node's reverse proxy (Nginx or Caddy), which terminates TLS and routes each request by its HTTP `Host` header. That is why name access requires a plain `http` upstream:
+
+- **TLS belongs at the super node.** An `https` upstream would make the reverse proxy open a second TLS session to it through the Active Proxy tunnel, which is already encrypted, spending the super node's resources for no added protection.
+- **It is not end to end.** The super node sees the decrypted HTTP traffic. A service that needs TLS all the way to the upstream should use the port-mapped endpoint instead.
 
 ---
 
@@ -192,9 +207,9 @@ ActiveProxyClient client = new ActiveProxyClient(vertx, node, config);
 client.addConnectionListener(new ConnectionStatusListener() {
     @Override
     public void connected() {
+        // The endpoints exist only while the tunnel is up, so read them here.
         System.out.println("Tunnel connected. Public endpoint: " + client.getEndpoint());
-        if (client.isNameAccessEnabled())
-            System.out.println("DNS endpoint: " + client.getNamedEndpoint());
+        client.getNamedEndpoint().ifPresent(named -> System.out.println("Named endpoint: " + named));
     }
 
     @Override
@@ -203,14 +218,32 @@ client.addConnectionListener(new ConnectionStatusListener() {
     }
 });
 
-client.start().toCompletionStage().toCompletableFuture().get();
+// start() completes once the session is deployed; the tunnel then authenticates and
+// connected() reports the endpoints. The client keeps reconnecting on its own after that.
+client.start().get();
 
-// The local service is now publicly reachable via client.getEndpoint().
-System.out.println("Public endpoint: " + client.getEndpoint());
+// ...
 
 // Stop when done.
-client.stop().toCompletionStage().toCompletableFuture().get();
+client.stop().get();
 ```
+
+### Standalone client
+
+The module also ships a command line launcher that runs the client without a DHT node. `./mvnw package` assembles it under `target/dist`:
+
+```
+target/dist/bin/active-proxy.sh
+target/dist/lib/*.jar
+```
+
+```bash
+target/dist/bin/active-proxy.sh                  # reads ~/.config/boson/client/active-proxy.yaml
+target/dist/bin/active-proxy.sh -c my-proxy.yaml
+target/dist/bin/active-proxy.sh --help           # options and exit codes
+```
+
+Without a DHT node the service peer cannot be looked up, so `service.host` is required, and `announcePeer` has no effect. Only one instance may run per device key.
 
 ---
 

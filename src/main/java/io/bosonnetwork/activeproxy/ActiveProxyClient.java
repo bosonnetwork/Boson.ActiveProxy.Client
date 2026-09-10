@@ -223,7 +223,8 @@ public class ActiveProxyClient {
 
 	/**
 	 * Returns the public named (DNS) endpoint allocated by the super node when name access is
-	 * enabled.
+	 * enabled, as an {@code https://} URL: the super node terminates TLS and forwards plain HTTP to
+	 * the upstream.
 	 *
 	 * @return the named endpoint, or an empty {@link Optional} if no named endpoint was assigned
 	 * @throws IllegalStateException if the client is not connected

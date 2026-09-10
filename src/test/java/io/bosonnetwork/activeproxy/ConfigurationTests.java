@@ -158,7 +158,7 @@ public class ConfigurationTests {
 				.service(Id.random(), "192.168.8.80", 9090)
 				.userKey(userKey)
 				.deviceKey(deviceKey)
-				.upstream("127.0.0.1", 8888, "http://")
+				.upstream("127.0.0.1", 8888, "http")
 				.nameAccess(true)
 				.announcePeer(false)
 				.build();
@@ -205,7 +205,7 @@ public class ConfigurationTests {
 		Map<String, Object> upstream = new LinkedHashMap<>();
 		upstream.put("host", "127.0.0.1");
 		upstream.put("port", 8888);
-		upstream.put("scheme", "http://");
+		upstream.put("scheme", "http");
 
 		Map<String, Object> map = new LinkedHashMap<>();
 		map.put("service", service);
@@ -232,7 +232,7 @@ public class ConfigurationTests {
 		assertEquals(DEVICE_KEY, config.getDeviceKey());
 		assertEquals("127.0.0.1", config.getUpstreamHost());
 		assertEquals(8888, config.getUpstreamPort());
-		assertEquals("http://", config.getUpstreamScheme());
+		assertEquals("http", config.getUpstreamScheme());
 		assertTrue(config.isNameAccessEnabled());
 		assertTrue(config.isAnnouncePeer());
 	}
@@ -322,7 +322,7 @@ public class ConfigurationTests {
 
 		assertNull(config.getServiceHost(), "host stays unset so the endpoint is resolved via the DHT");
 		assertEquals(9090, config.getServicePort(), "default service port");
-		assertEquals("tcp://", config.getUpstreamScheme(), "default upstream scheme");
+		assertEquals("http", config.getUpstreamScheme(), "default upstream scheme");
 		assertFalse(config.isNameAccessEnabled());
 		assertFalse(config.isAnnouncePeer());
 	}
@@ -504,7 +504,7 @@ public class ConfigurationTests {
 		assertNotNull(config.getDeviceKey());
 		assertEquals("127.0.0.1", config.getUpstreamHost());
 		assertEquals(8888, config.getUpstreamPort());
-		assertEquals("http://", config.getUpstreamScheme());
+		assertEquals("http", config.getUpstreamScheme());
 		assertTrue(config.isNameAccessEnabled());
 		assertFalse(config.isAnnouncePeer());
 	}
@@ -524,5 +524,114 @@ public class ConfigurationTests {
 		assertEquals(SERVICE_PEER_ID, config.getServicePeerId());
 		assertEquals(USER_ID, config.getUserId());
 		assertEquals(DEVICE_KEY, config.getDeviceKey());
+	}
+
+	@Test
+	void nameAccessWithUnsupportedScheme() {
+		Configuration.Builder builder = Configuration.builder()
+				.service(SERVICE_PEER_ID)
+				.serviceHost("192.168.8.80")
+				.servicePort(9090)
+				.deviceKey(Signature.KeyPair.random())
+				.userId(Id.random())
+				.upstream("127.0.0.1", 8888, "mqtts")
+				.nameAccess(true);
+
+		Exception e = assertThrows(IllegalStateException.class, builder::build);
+		assertTrue(e.getMessage().contains("Name access requires an http upstream"), e.getMessage());
+		assertTrue(e.getMessage().contains("'mqtts'"), "the message should name the offending scheme: " + e.getMessage());
+	}
+
+	/**
+	 * An https upstream is the realistic mistake: TLS for the named endpoint is terminated at the
+	 * super node, so name access must reject it even though it is a perfectly good scheme otherwise.
+	 */
+	@Test
+	void nameAccessRejectsHttpsButAcceptsHttpInAnySpelling() {
+		Configuration.Builder https = Configuration.builder()
+				.service(SERVICE_PEER_ID, "192.168.8.80", 9090)
+				.userId(USER_ID)
+				.deviceKey(Signature.KeyPair.random())
+				.upstream("127.0.0.1", 8888, "https")
+				.nameAccess(true);
+		assertThrows(IllegalStateException.class, https::build);
+
+		// The same https upstream is fine without name access: the port-mapped endpoint relays bytes.
+		assertEquals("https", https.nameAccess(false).build().getUpstreamScheme());
+
+		for (String spelling : List.of("http", "HTTP", "Http://", " http:// ")) {
+			Configuration config = https.upstreamScheme(spelling).nameAccess(true).build();
+			assertEquals("http", config.getUpstreamScheme(), "spelling: [" + spelling + "]");
+			assertTrue(config.isNameAccessEnabled());
+		}
+	}
+
+	@Test
+	void upstreamSchemeIsNormalized() {
+		for (String[] c : new String[][] {
+				{"tcp", "tcp"}, {"TCP://", "tcp"}, {"  Https  ", "https"}, {"svn+ssh", "svn+ssh"}, {"x-custom.v1", "x-custom.v1"}}) {
+			Configuration config = Configuration.builder()
+					.service(SERVICE_PEER_ID, "192.168.8.80", 9090)
+					.userId(USER_ID)
+					.deviceKey(Signature.KeyPair.random())
+					.upstream("127.0.0.1", 8888, c[0])
+					.build();
+			assertEquals(c[1], config.getUpstreamScheme(), "input: [" + c[0] + "]");
+		}
+	}
+
+	@Test
+	void invalidUpstreamSchemesAreRejected() {
+		for (String bad : List.of("", "   ", "://", "http:", "http:/", "1http", "ht tp", "http/", "-http", "http://x")) {
+			IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+					() -> Configuration.builder().upstreamScheme(bad), "input: [" + bad + "]");
+			assertTrue(e.getMessage().contains("Invalid upstream scheme"), e.getMessage());
+		}
+	}
+
+	/**
+	 * {@code service} and {@code upstream} both have a {@code host} and a {@code port}, so a missing
+	 * one must be reported with its section, or the message does not say which to fix.
+	 */
+	@Test
+	void fieldErrorsNameTheirSection() {
+		Map<String, Object> noUpstreamHost = fullMap();
+		section(noUpstreamHost, "upstream").remove("host");
+		IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+				() -> Configuration.fromMap(noUpstreamHost));
+		assertTrue(e.getMessage().startsWith("upstream: "), e.getMessage());
+
+		Map<String, Object> badServicePort = fullMap();
+		section(badServicePort, "service").put("port", 70000);
+		e = assertThrows(IllegalArgumentException.class, () -> Configuration.fromMap(badServicePort));
+		assertTrue(e.getMessage().startsWith("service: "), e.getMessage());
+
+		Map<String, Object> badScheme = fullMap();
+		section(badScheme, "upstream").put("scheme", "ht tp");
+		e = assertThrows(IllegalArgumentException.class, () -> Configuration.fromMap(badScheme));
+		assertTrue(e.getMessage().startsWith("upstream: Invalid upstream scheme"), e.getMessage());
+	}
+
+	@Test
+	void malformedKeyEncodingNamesTheKey() {
+		Map<String, Object> badDeviceKey = fullMap();
+		section(badDeviceKey, "client").put("devicePrivateKey", "not-base58-0OIl");
+		IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+				() -> Configuration.fromMap(badDeviceKey));
+		assertTrue(e.getMessage().startsWith("client: Invalid device private key"), e.getMessage());
+
+		Map<String, Object> badUserKey = fullMap();
+		section(badUserKey, "client").put("userPrivateKey", "0xZZ");
+		e = assertThrows(IllegalArgumentException.class, () -> Configuration.fromMap(badUserKey));
+		assertTrue(e.getMessage().startsWith("client: Invalid user private key"), e.getMessage());
+	}
+
+	@Test
+	void missingUserIdentityExplainsBothOptions() {
+		Map<String, Object> noIdentity = fullMap();
+		section(noIdentity, "client").remove("userId");
+		section(noIdentity, "client").remove("userPrivateKey");
+		IllegalStateException e = assertThrows(IllegalStateException.class, () -> Configuration.fromMap(noIdentity));
+		assertTrue(e.getMessage().contains("client.userId or client.userPrivateKey"), e.getMessage());
 	}
 }

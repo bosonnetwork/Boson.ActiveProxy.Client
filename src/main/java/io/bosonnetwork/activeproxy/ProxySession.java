@@ -50,6 +50,10 @@ import io.bosonnetwork.crypto.CryptoIdentity;
 import io.bosonnetwork.vertx.BosonVerticle;
 
 class ProxySession extends BosonVerticle {
+	// The super node serves every named endpoint over HTTPS, terminating TLS in its reverse proxy;
+	// the name it hands back carries no scheme of its own.
+	private static final String NAMED_ENDPOINT_SCHEME = "https";
+
 	private static final int PERIODIC_CHECK_INTERVAL = 15 * 1000;       // 15 seconds
 	private static final int IDLE_CHECK_INTERVAL = 60 * 1000;           // 1 minute
 	private static final int STOP_DELAY = 5 * 1000;                     // 5 seconds
@@ -445,8 +449,8 @@ class ProxySession extends BosonVerticle {
 
 		this.maxConnections = maxConnections;
 		this.nameAccessEnabled = nameAccess;
-		this.endpoint = config.getUpstreamScheme() + endpoint;
-		this.namedEndpoint = namedEndpoint == null ? null : config.getUpstreamScheme() + namedEndpoint;
+		this.endpoint = config.getUpstreamScheme() + "://" + endpoint;
+		this.namedEndpoint = namedEndpoint == null ? null : NAMED_ENDPOINT_SCHEME + "://" + namedEndpoint;
 		this.sessionContext = new CryptoContext(servicePeerId, serverSessionPk, sessionKeyPair.privateKey());
 		this.connected = true;
 		log.info("Proxy session {} authenticated, max connections: {}, endpoint: {}, named endpoint: {}",
