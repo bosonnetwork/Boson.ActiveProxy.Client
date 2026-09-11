@@ -657,9 +657,15 @@ interface Packet {
 		return packet;
 	}
 
-	private static int paddingSize(int size) {
-		// round up to the nearest multiple of 256
-		int bound = ((size + 255) & ~255);
+	// Package-private for tests.
+	static int paddingSize(int size) {
+		// The size field is an unsigned short, so a larger packet cannot be encoded at all.
+		if (size > 0xFFFF)
+			throw new IllegalArgumentException("Packet too large: " + size + " bytes, the limit is 65535");
+
+		// Round up to the next multiple of 256, but never past 0xFFFF: a packet padded out to 65536
+		// bytes would go out declaring a size of 0.
+		int bound = Math.min((size + 255) & ~255, 0xFFFF);
 		return Random.secureRandom().nextInt(bound - size + 1);
 	}
 

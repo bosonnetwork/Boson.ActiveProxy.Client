@@ -129,4 +129,23 @@ class PacketTest {
 
 		assertThrows(MalformedPacketException.class, () -> Packet.Data.decode(Buffer.buffer(raw), ctx[1]));
 	}
+
+	/**
+	 * The size field is an unsigned short, so padding must never carry a packet past 65535 bytes,
+	 * even where rounding up to the next multiple of 256 would reach 65536. Padding is random, so
+	 * each size is drawn often enough that an unclamped bound would be caught.
+	 */
+	@Test
+	void paddingNeverOverflowsTheSizeField() {
+		for (int size : new int[] { 1, 255, 256, 300, 65280, 65281, 65500, 65534, 65535 }) {
+			int roundedUp = Math.min((size + 255) & ~255, 65535);
+			for (int i = 0; i < 2000; i++) {
+				int padding = Packet.paddingSize(size);
+				assertTrue(padding >= 0 && size + padding <= roundedUp, size + " + " + padding);
+			}
+		}
+
+		// Past the u16 limit the packet cannot be encoded at all, so that must fail, not pad to 0.
+		assertThrows(IllegalArgumentException.class, () -> Packet.paddingSize(65536));
+	}
 }
