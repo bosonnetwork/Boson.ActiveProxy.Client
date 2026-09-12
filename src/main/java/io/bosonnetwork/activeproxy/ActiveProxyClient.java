@@ -24,6 +24,7 @@ package io.bosonnetwork.activeproxy;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -47,8 +48,12 @@ import io.bosonnetwork.vertx.ContextualFuture;
  * <p>
  * The client is configured with an immutable {@link Configuration}. After construction, call
  * {@link #start()} to bring up the tunnel and {@link #stop()} to tear it down; both return a
- * {@link ContextualFuture} that completes when the operation finishes. Register a
- * {@link ConnectionStatusListener} to observe connect/disconnect events, and query
+ * {@link CompletableFuture} that completes when the operation finishes, on the caller's Vert.x
+ * context. A Vert.x caller can turn one back into a {@link io.vertx.core.Future} with
+ * {@code Future.fromCompletionStage}. Cancellation is not supported: {@code cancel()} returns
+ * {@code false} and never stops the operation.
+ * <p>
+ * Register a {@link ConnectionStatusListener} to observe connect/disconnect events, and query
  * {@link #getEndpoint()} / {@link #getNamedEndpoint()} for the public endpoint(s) once connected.
  * <p>
  * <b>Threading:</b> the tunnel runs on a Vert.x event loop, but all methods on this class are safe
@@ -124,7 +129,7 @@ public class ActiveProxyClient {
 	 *
 	 * @return a future that completes when the session has started, or fails if startup failed
 	 */
-	public ContextualFuture<Void> start() {
+	public CompletableFuture<Void> start() {
 		if (!started.compareAndSet(false, true))
 			return ContextualFuture.succeededFuture();
 
@@ -152,7 +157,7 @@ public class ActiveProxyClient {
 	 *
 	 * @return a future that completes when the client has fully stopped
 	 */
-	public ContextualFuture<Void> stop() {
+	public CompletableFuture<Void> stop() {
 		if (!started.compareAndSet(true, false))
 			return ContextualFuture.succeededFuture();
 
