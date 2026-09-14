@@ -160,9 +160,6 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-javadoc-plugin</artifactId>
-                <configuration>
-                    <excludePackageNames>io.bosonnetwork.*:io.moquette:io.moquette.*</excludePackageNames>
-                </configuration>
             </plugin>
 
             <plugin>
@@ -173,14 +170,6 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-            </plugin>
-
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-deploy-plugin</artifactId>
-                <configuration>
-                    <skip>true</skip>
-                </configuration>
             </plugin>
 
             <!-- Assemble target/dist: bin/active-proxy.sh next to lib/*.jar, the layout the
