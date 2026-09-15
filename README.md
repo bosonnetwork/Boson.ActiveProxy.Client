@@ -107,6 +107,27 @@ Add the following to your Maven `pom.xml`:
 
 The library requires a Vert.x instance and a running Boson `Node` (from `boson-core-dht`) to be provided by the caller.
 
+### Native transport
+
+This library carries no platform-specific native libraries, so it runs on Java NIO wherever it is deployed. To use Netty's native transport (epoll on Linux, kqueue on macOS), add the native jars for the platform the application runs on, and create the Vert.x instance the client runs on with `new VertxOptions().setPreferNativeTransport(true)`. For Linux x86_64:
+
+```xml
+<dependency>
+    <groupId>io.netty</groupId>
+    <artifactId>netty-transport-native-epoll</artifactId>
+    <classifier>linux-x86_64</classifier>
+    <scope>runtime</scope>
+</dependency>
+<dependency>
+    <groupId>io.netty</groupId>
+    <artifactId>netty-transport-native-unix-common</artifactId>
+    <classifier>linux-x86_64</classifier>
+    <scope>runtime</scope>
+</dependency>
+```
+
+The native jars must match the Netty version on the class path. See [Native Transport](https://docs.bosonnetwork.io/build-apps/java-sdk/native-transport) for every platform, Maven profiles and Gradle.
+
 ---
 
 ## Configuration
