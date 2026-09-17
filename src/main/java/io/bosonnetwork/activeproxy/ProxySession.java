@@ -23,7 +23,7 @@
 package io.bosonnetwork.activeproxy;
 
 import java.net.InetAddress;
-import java.net.URI;
+import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -375,13 +375,15 @@ class ProxySession extends BosonVerticle {
 				}
 
 				PeerInfo peer = p.get();
-				URI uri = URI.create(peer.getEndpoint());
-				if (!uri.getScheme().equals("tcp") || uri.getPort() <= 0) {
+				InetSocketAddress endpoint;
+				try {
+					endpoint = Configuration.parseServiceEndpoint(peer.getEndpoint());
+				} catch (IllegalArgumentException e) {
 					log.error("Service peer endpoint {} is invalid", peer.getEndpoint());
 					return Future.failedFuture("Service peer endpoint is invalid: " + peer.getEndpoint());
 				}
 
-				SocketAddress addr = SocketAddress.inetSocketAddress(uri.getPort(), uri.getHost());
+				SocketAddress addr = SocketAddress.inetSocketAddress(endpoint.getPort(), endpoint.getHostString());
 				return Future.succeededFuture(addr);
 			});
 		} else {

@@ -249,22 +249,15 @@ client.start().get();
 client.stop().get();
 ```
 
-### Standalone client
+### Without a DHT node
 
-The module also ships a command line launcher that runs the client without a DHT node. `./mvnw package` assembles it under `target/dist`:
+A client that knows the super node's address needs no DHT node: pass `null` for the node, and set the service address with `service.host`/`service.port`, or with `Configuration.Builder.serviceEndpoint("tcp://host:port")`, the form a super node's Director reports for the service. Without a node, `announcePeer` has no effect.
 
-```
-target/dist/bin/active-proxy.sh
-target/dist/lib/*.jar
-```
+The local service can be given in one value with `Configuration.Builder.upstream(...)`: `localhost:8080` for an `http` upstream, or `tcp://127.0.0.1:22` with a scheme of its own.
 
-```bash
-target/dist/bin/active-proxy.sh                  # reads ~/.config/boson/client/active-proxy.yaml
-target/dist/bin/active-proxy.sh -c my-proxy.yaml
-target/dist/bin/active-proxy.sh --help           # options and exit codes
-```
+### Command line
 
-Without a DHT node the service peer cannot be looked up, so `service.host` is required, and `announcePeer` has no effect. Only one instance may run per device key.
+To run the client from a terminal, use `boson-cli proxy start` from [Boson Tools](https://github.com/bosonnetwork/Boson.Tools). It finds the Active Proxy service through the super node configured for `boson-cli`, so only the upstream needs to be given.
 
 ---
 

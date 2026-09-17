@@ -483,7 +483,7 @@ public class ConfigurationTests {
 	}
 
 	/**
-	 * The bundled testConfig.yaml is the shape the launcher actually loads from disk; parsing it
+	 * The bundled testConfig.yaml is the shape a configuration file takes on disk; parsing it
 	 * keeps the resource and the parser honest about each other.
 	 */
 	@Test
@@ -633,5 +633,47 @@ public class ConfigurationTests {
 		section(noIdentity, "client").remove("userPrivateKey");
 		IllegalStateException e = assertThrows(IllegalStateException.class, () -> Configuration.fromMap(noIdentity));
 		assertTrue(e.getMessage().contains("client.userId or client.userPrivateKey"), e.getMessage());
+	}
+
+	private static Configuration.Builder identified() {
+		return Configuration.builder().service(SERVICE_PEER_ID).userKey(USER_KEY).deviceKey(DEVICE_KEY);
+	}
+
+	@Test
+	void serviceEndpointSetsTheAddress() {
+		Configuration config = identified().serviceEndpoint("tcp://node.example.com:8090").upstream("localhost:8080").build();
+		assertEquals("node.example.com", config.getServiceHost());
+		assertEquals(8090, config.getServicePort());
+
+		Configuration v6 = identified().serviceEndpoint("tcp://[2001:db8::1]:8090").upstream("localhost:8080").build();
+		assertEquals("2001:db8::1", v6.getServiceHost());
+
+		for (String bad : List.of("node.example.com:8090", "http://node.example.com:8090", "tcp://node.example.com",
+				"tcp://:8090", "not a uri"))
+			assertThrows(IllegalArgumentException.class, () -> identified().serviceEndpoint(bad), bad);
+	}
+
+	@Test
+	void upstreamTakesAUriWithHttpByDefault() {
+		Configuration plain = identified().service(SERVICE_PEER_ID, "h", 1).upstream("localhost:8080").build();
+		assertEquals("localhost", plain.getUpstreamHost());
+		assertEquals(8080, plain.getUpstreamPort());
+		assertEquals("http", plain.getUpstreamScheme());
+
+		Configuration ssh = identified().service(SERVICE_PEER_ID, "h", 1).upstream("TCP://127.0.0.1:22").build();
+		assertEquals("127.0.0.1", ssh.getUpstreamHost());
+		assertEquals(22, ssh.getUpstreamPort());
+		assertEquals("tcp", ssh.getUpstreamScheme());
+
+		Configuration https = identified().service(SERVICE_PEER_ID, "h", 1).upstream("https://example.com/").build();
+		assertEquals(443, https.getUpstreamPort());
+		assertEquals("https", https.getUpstreamScheme());
+
+		Configuration v6 = identified().service(SERVICE_PEER_ID, "h", 1).upstream("[::1]:8080").build();
+		assertEquals("::1", v6.getUpstreamHost());
+
+		for (String bad : List.of("", "localhost", "tcp://localhost", "localhost:8080/app", "localhost:8080?x=1",
+				"user@localhost:8080", "localhost:0", "localhost:70000", ":8080"))
+			assertThrows(IllegalArgumentException.class, () -> identified().upstream(bad), bad);
 	}
 }

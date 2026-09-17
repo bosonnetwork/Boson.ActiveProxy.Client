@@ -22,6 +22,9 @@
 
 package io.bosonnetwork.activeproxy;
 
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -268,6 +271,34 @@ public class Configuration {
 	}
 
 	/**
+	 * Parses the endpoint an Active Proxy service announces: {@code tcp://host:port}.
+	 *
+	 * @param endpoint the endpoint
+	 * @return the address, unresolved
+	 * @throws IllegalArgumentException if the endpoint is not a {@code tcp://host:port} URI
+	 */
+	static InetSocketAddress parseServiceEndpoint(String endpoint) {
+		Objects.requireNonNull(endpoint, "endpoint");
+		URI uri;
+		try {
+			uri = new URI(endpoint.trim());
+		} catch (URISyntaxException e) {
+			throw new IllegalArgumentException("Invalid service endpoint '" + endpoint + "': expected tcp://host:port", e);
+		}
+
+		String host = uri.getHost();
+		if (!"tcp".equalsIgnoreCase(uri.getScheme()) || host == null || host.isEmpty() || uri.getPort() <= 0)
+			throw new IllegalArgumentException("Invalid service endpoint '" + endpoint + "': expected tcp://host:port");
+
+		return InetSocketAddress.createUnresolved(unbracket(host), uri.getPort());
+	}
+
+	// URI keeps the brackets around an IPv6 host; a socket address takes the address without them.
+	private static String unbracket(String host) {
+		return host.startsWith("[") && host.endsWith("]") ? host.substring(1, host.length() - 1) : host;
+	}
+
+	/**
 	 * Creates a new, empty configuration builder.
 	 *
 	 * @return a fresh {@link Builder}
@@ -330,6 +361,23 @@ public class Configuration {
 		public Builder service(Id servicePeerId) {
 			Objects.requireNonNull(servicePeerId, "servicePeerId");
 			this.servicePeerId = servicePeerId;
+			return this;
+		}
+
+		/**
+		 * Sets the fixed super-node address from the endpoint the Active Proxy service announces, a
+		 * {@code tcp://host:port} URI, bypassing DHT resolution. This is the form a super node's
+		 * Director reports for the service, so a client that found the service there can connect
+		 * without a DHT node.
+		 *
+		 * @param endpoint the service endpoint, such as {@code tcp://node.example.com:8090}
+		 * @return this builder
+		 * @throws IllegalArgumentException if the endpoint is not a {@code tcp://host:port} URI
+		 */
+		public Builder serviceEndpoint(String endpoint) {
+			InetSocketAddress address = parseServiceEndpoint(endpoint);
+			serviceHost(address.getHostString());
+			servicePort(address.getPort());
 			return this;
 		}
 
@@ -507,6 +555,61 @@ public class Configuration {
 			upstreamHost(host);
 			upstreamPort(port);
 			upstreamScheme(scheme);
+			return this;
+		}
+
+		/**
+		 * Sets the local upstream service to expose from a URI: {@code scheme://host:port}, or
+		 * {@code host:port} for an {@code http} upstream. The scheme is checked as
+		 * {@link #upstreamScheme(String)} checks it. The port may be left out only after an explicit
+		 * {@code http://} (80) or {@code https://} (443); an IPv6 host is written in brackets, as in
+		 * {@code [::1]:8080}.
+		 *
+		 * @param uri the upstream, such as {@code localhost:8080} or {@code tcp://127.0.0.1:22}
+		 * @return this builder
+		 * @throws IllegalArgumentException if the value is not such a URI
+		 */
+		public Builder upstream(String uri) {
+			Objects.requireNonNull(uri, "uri");
+			String value = uri.trim();
+			if (value.isEmpty())
+				throw new IllegalArgumentException("Empty upstream: expected [scheme://]host:port");
+
+			boolean hasScheme = value.contains("://");
+			String text = hasScheme ? value : DEFAULT_SCHEME + "://" + value;
+			URI parsed;
+			try {
+				parsed = new URI(text);
+			} catch (URISyntaxException e) {
+				throw new IllegalArgumentException("Invalid upstream '" + uri + "': expected [scheme://]host:port", e);
+			}
+
+			String host = parsed.getHost();
+			if (parsed.getScheme() == null || host == null || host.isEmpty() || parsed.getRawUserInfo() != null)
+				throw new IllegalArgumentException("Invalid upstream '" + uri + "': expected [scheme://]host:port");
+
+			String path = parsed.getRawPath();
+			if ((path != null && !path.isEmpty() && !path.equals("/")) || parsed.getRawQuery() != null ||
+					parsed.getRawFragment() != null)
+				throw new IllegalArgumentException("Invalid upstream '" + uri + "': only a host and port are " +
+						"forwarded, so it cannot carry a path or query");
+
+			upstreamScheme(parsed.getScheme());
+			int port = parsed.getPort();
+			if (port < 0) {
+				if (!hasScheme)
+					throw new IllegalArgumentException("Invalid upstream '" + uri + "': expected host:port");
+
+				port = switch (upstreamScheme) {
+					case "http" -> 80;
+					case "https" -> 443;
+					default -> throw new IllegalArgumentException("Invalid upstream '" + uri +
+							"': a " + upstreamScheme + " upstream needs a port");
+				};
+			}
+
+			upstreamHost(unbracket(host));
+			upstreamPort(port);
 			return this;
 		}
 
