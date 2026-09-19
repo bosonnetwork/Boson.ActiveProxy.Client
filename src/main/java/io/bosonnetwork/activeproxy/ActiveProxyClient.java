@@ -50,8 +50,7 @@ import io.bosonnetwork.vertx.ContextualFuture;
  * {@link #start()} to bring up the tunnel and {@link #stop()} to tear it down; both return a
  * {@link CompletableFuture} that completes when the operation finishes, on the caller's Vert.x
  * context. A Vert.x caller can turn one back into a {@link io.vertx.core.Future} with
- * {@code Future.fromCompletionStage}. Cancellation is not supported: {@code cancel()} returns
- * {@code false} and never stops the operation.
+ * {@code Future.fromCompletionStage}.
  * <p>
  * Register a {@link ConnectionStatusListener} to observe connect/disconnect events, and query
  * {@link #getEndpoint()} / {@link #getNamedEndpoint()} for the public endpoint(s) once connected.
