@@ -95,17 +95,48 @@ To skip tests:
 
 ## Adding as a Dependency
 
-Add the following to your Maven `pom.xml`:
+Published to Maven Central under the group id `io.bosonnetwork`. The current release is **3.1.2**
+and requires Java 17 or later.
+
+**Maven**
 
 ```xml
 <dependency>
     <groupId>io.bosonnetwork</groupId>
     <artifactId>boson-active-proxy-client</artifactId>
-    <version>${boson.version}</version>
+    <version>3.1.2</version>
 </dependency>
 ```
 
-The library requires a Vert.x instance and a running Boson `Node` (from `boson-core-dht`) to be provided by the caller.
+**Gradle (Kotlin DSL)**
+
+```kotlin
+implementation("io.bosonnetwork:boson-active-proxy-client:3.1.2")
+```
+
+Using more than one Boson library, import the bill of materials once and leave the versions off the
+dependencies themselves:
+
+```xml
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>io.bosonnetwork</groupId>
+            <artifactId>boson-dependencies</artifactId>
+            <version>3.1.2</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
+```
+
+```kotlin
+implementation(platform("io.bosonnetwork:boson-dependencies:3.1.2"))
+implementation("io.bosonnetwork:boson-active-proxy-client")
+```
+
+The library requires a Vert.x instance and a running Boson `Node` (from `boson-dht`) to be provided by the caller.
 
 ### Native transport
 
