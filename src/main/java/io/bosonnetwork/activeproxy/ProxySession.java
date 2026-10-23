@@ -47,6 +47,7 @@ import io.bosonnetwork.PeerInfo;
 import io.bosonnetwork.crypto.CryptoBox;
 import io.bosonnetwork.crypto.CryptoException;
 import io.bosonnetwork.crypto.CryptoIdentity;
+import io.bosonnetwork.utils.MonotonicClock;
 import io.bosonnetwork.vertx.BosonVerticle;
 
 class ProxySession extends BosonVerticle {
@@ -231,7 +232,7 @@ class ProxySession extends BosonVerticle {
 				.setIdleTimeoutUnit(TimeUnit.SECONDS)
 				.setReceiveBufferSize(RECEIVE_BUFFER_SIZE));
 
-		lastIdleCheckTimestamp = System.currentTimeMillis();
+		lastIdleCheckTimestamp = MonotonicClock.elapsedMillis();
 		periodicCheckTimer = vertx.setPeriodic(PERIODIC_CHECK_INTERVAL, this::periodicCheck);
 
 		running = true;
@@ -295,7 +296,7 @@ class ProxySession extends BosonVerticle {
 	}
 
 	private void tryCloseIdleConnections() {
-		long now = System.currentTimeMillis();
+		long now = MonotonicClock.elapsedMillis();
 		if (now - lastIdleCheckTimestamp < IDLE_CHECK_INTERVAL)
 			return;
 
@@ -323,7 +324,7 @@ class ProxySession extends BosonVerticle {
 	}
 
 	private void tryAnnouncePeer() {
-		long now = System.currentTimeMillis();
+		long now = MonotonicClock.elapsedMillis();
 		if (node == null || peerInfo == null || now - lastAnnounceTimestamp < RE_ANNOUNCE_INTERVAL)
 			return;
 
@@ -501,9 +502,9 @@ class ProxySession extends BosonVerticle {
 
 		if (connections.isEmpty()) {
 			log.warn("Proxy session {} is dangling ...", servicePeerId);
-			danglingTimestamp = System.currentTimeMillis();
+			danglingTimestamp = MonotonicClock.elapsedMillis();
 			vertx.setTimer(STOP_DELAY, unused -> {
-				if (running && danglingTimestamp > 0 && System.currentTimeMillis() - danglingTimestamp >= STOP_DELAY) {
+				if (running && danglingTimestamp > 0 && MonotonicClock.elapsedMillis() - danglingTimestamp >= STOP_DELAY) {
 					log.info("Proxy session {} disconnected, reset session to reconnect", servicePeerId);
 					reset();
 					runOnContext(v -> {
@@ -521,7 +522,7 @@ class ProxySession extends BosonVerticle {
 
 	private void connectionIdleHandler(ProxyConnection connection) {
 		if (connections.markIdle(connection) && connections.inFlight() == 0)
-			idleTimestamp = System.currentTimeMillis();
+			idleTimestamp = MonotonicClock.elapsedMillis();
 	}
 
 	private void connectionBusyHandler(ProxyConnection connection) {

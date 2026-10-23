@@ -36,6 +36,7 @@ import io.bosonnetwork.CryptoContext;
 import io.bosonnetwork.Id;
 import io.bosonnetwork.crypto.CryptoBox;
 import io.bosonnetwork.crypto.Random;
+import io.bosonnetwork.utils.MonotonicClock;
 
 /**
  * A single multiplexing connection between this client and the Active Proxy super node.
@@ -185,7 +186,7 @@ class ProxyConnection {
 		this.sessionContext = sessionContext;
 		this.handler = handler;
 
-		this.lastReceiveTimestamp = System.currentTimeMillis();
+		this.lastReceiveTimestamp = MonotonicClock.elapsedMillis();
 		this.proxySocket = proxySocket;
 		proxySocket.endHandler(v -> {
 			log.debug("Connection {} closed by proxy socket", id);
@@ -273,7 +274,7 @@ class ProxyConnection {
 		log.trace("Connection {} got {} bytes data from proxy socket {}",
 				id, buffer.length(), proxySocket.remoteAddress());
 
-		lastReceiveTimestamp = System.currentTimeMillis();
+		lastReceiveTimestamp = MonotonicClock.elapsedMillis();
 
 		int pos = 0;
 		int remaining = buffer.length();
@@ -575,7 +576,7 @@ class ProxyConnection {
 	}
 
 	protected void healthCheck() {
-		long now = System.currentTimeMillis();
+		long now = MonotonicClock.elapsedMillis();
 		if (now - lastReceiveTimestamp >= MAX_KEEP_ALIVE_RETRY * KEEP_ALIVE_INTERVAL) {
 			log.warn("Connection {} keep alive timeout, close now", id);
 			close();
