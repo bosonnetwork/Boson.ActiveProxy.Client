@@ -350,7 +350,7 @@ class ProxySession extends BosonVerticle {
 	}
 
 	private boolean needsNewConnection() {
-		if (!running)
+		if (!running || danglingTimestamp != 0)
 			return false;
 
 		// Count in-flight dials against the ceiling so concurrent busy/close handlers cannot
@@ -501,23 +501,28 @@ class ProxySession extends BosonVerticle {
 			return;
 
 		if (connections.isEmpty()) {
+			if (danglingTimestamp != 0)
+				return;
 			log.warn("Proxy session {} is dangling ...", servicePeerId);
 			danglingTimestamp = MonotonicClock.elapsedMillis();
 			vertx.setTimer(STOP_DELAY, unused -> {
 				if (running && danglingTimestamp > 0 && MonotonicClock.elapsedMillis() - danglingTimestamp >= STOP_DELAY) {
 					log.info("Proxy session {} disconnected, reset session to reconnect", servicePeerId);
+					boolean wasConnected = connected;
 					reset();
-					runOnContext(v -> {
-						ConnectionStatusListener listener = connectionStatusListener;
-						if (listener != null)
-							listener.disconnected();
-					});
+					if (wasConnected)
+						runOnContext(v -> {
+							ConnectionStatusListener listener = connectionStatusListener;
+							if (listener != null)
+								listener.disconnected();
+						});
+					if (needsNewConnection())
+						connect();
 				}
 			});
-		}
-
-		if (needsNewConnection())
+		} else if (needsNewConnection()) {
 			connect();
+		}
 	}
 
 	private void connectionIdleHandler(ProxyConnection connection) {
